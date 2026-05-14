@@ -1,4 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from "react-router-dom";
+import { DropdownSelect } from "./DropdownSelect.jsx";
+import { PageTitleWithBack } from "./PageTitleWithBack.jsx";
+import { ProductStudioLayout } from "./ProductStudioPage.jsx";
 
 const countryMaster = [
   "United Arab Emirates",
@@ -181,8 +185,568 @@ const initialQuotes = [
   },
 ];
 
+const productConfigurationBenefits = [
+  "Family Takaful Benefit (with TI)",
+  "Accidental Death Benefit (ADB)",
+  "Total & Permanent Disability (TPD)",
+  "Waiver of Contribution (WOC)",
+  "Critical Illness (CI)",
+  "Family Income Benefit (FIB)",
+  "Hospital Cash Benefit (HCB)",
+  "Accidental Total or Partial Permanent Disability (PPD)",
+];
+
+function emptyBenefitPricingCell() {
+  return { mode: "percent", value: "0" };
+}
+
+function createBenefitLoadingState(benefitNames) {
+  const state = {};
+  for (const name of benefitNames) {
+    state[name] = {
+      highSumCoverDiscount: { first: emptyBenefitPricingCell(), second: emptyBenefitPricingCell() },
+      otherDiscounts: { first: emptyBenefitPricingCell(), second: emptyBenefitPricingCell() },
+      otherLoadings: { first: emptyBenefitPricingCell(), second: emptyBenefitPricingCell() },
+    };
+  }
+  return state;
+}
+
+function migrateLegacyBenefitLoadingState(raw, benefitNames) {
+  if (!raw) {
+    return createBenefitLoadingState(benefitNames);
+  }
+
+  const sample = raw[benefitNames[0]]?.highSumCoverDiscount?.first;
+  if (sample && typeof sample === "object" && "mode" in sample && "value" in sample) {
+    return raw;
+  }
+
+  const migrated = {};
+  for (const name of benefitNames) {
+    const block = raw[name];
+    if (!block) {
+      migrated[name] = createBenefitLoadingState([name])[name];
+      continue;
+    }
+    migrated[name] = {
+      highSumCoverDiscount: {
+        first: { mode: "percent", value: String(block.highSumCoverDiscount?.first ?? "0") },
+        second: { mode: "percent", value: String(block.highSumCoverDiscount?.second ?? "0") },
+      },
+      otherDiscounts: {
+        first: { mode: "percent", value: String(block.otherDiscounts?.first ?? "") },
+        second: { mode: "percent", value: String(block.otherDiscounts?.second ?? "") },
+      },
+      otherLoadings: {
+        first: { mode: "percent", value: String(block.otherLoadings?.first ?? "") },
+        second: { mode: "percent", value: String(block.otherLoadings?.second ?? "") },
+      },
+    };
+  }
+  return migrated;
+}
+
+function parsePercentValue(raw) {
+  const n = parseFloat(String(raw ?? "").replace(/%/g, "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function computeNetPricingDisplay(benefitState, lifeKey) {
+  const rows = ["highSumCoverDiscount", "otherDiscounts", "otherLoadings"];
+  const cells = rows.map((row) => benefitState?.[row]?.[lifeKey]);
+  if (cells.some((cell) => !cell || cell.mode === "fixed")) {
+    return { kind: "mixed", text: "—", hint: "Net applies when all inputs use %" };
+  }
+
+  const discounts = parsePercentValue(cells[0].value) + parsePercentValue(cells[1].value);
+  const loadings = parsePercentValue(cells[2].value);
+  const net = loadings - discounts;
+  return { kind: "percent", text: `${net.toFixed(2)}%`, hint: null };
+}
+
+const productCatalog = [
+  { code: "SLP-001", name: "SecureLife Protector", type: "Term", currency: "AED", version: "v3.2", effectiveDate: "2026-06-01" },
+  { code: "FWL-002", name: "FutureWealth Life", type: "ULIP", currency: "AED", version: "v2.8", effectiveDate: "2026-06-15" },
+  { code: "TFS-003", name: "Takaful Family Shield", type: "Takaful", currency: "AED", version: "v4.1", effectiveDate: "2026-07-01" },
+];
+
+/** Default RGA Rates (2020 Treaty) — Death, ages 18–100 (template for new product configuration). */
+const RGA_DEATH_RATE_KNOTS = [
+  [18, [0.39, 0.116, 0.516, 0.204]],
+  [30, [0.431, 0.212, 0.611, 0.287]],
+  [40, [0.577, 0.528, 1.129, 0.801]],
+  [50, [0.805, 0.752, 1.592, 1.128]],
+  [60, [1.238, 1.168, 2.468, 1.892]],
+  [70, [2.22, 2.1, 4.38, 3.38]],
+  [80, [4.25, 4.0, 8.45, 6.55]],
+  [90, [8.35, 7.82, 16.65, 12.82]],
+  [100, [18.5, 17.2, 36.8, 28.2]],
+];
+
+function piecewiseLinearRgaValues(age, knots) {
+  if (age <= knots[0][0]) {
+    return [...knots[0][1]];
+  }
+  if (age >= knots[knots.length - 1][0]) {
+    return [...knots[knots.length - 1][1]];
+  }
+  let i = 0;
+  while (i < knots.length - 1 && knots[i + 1][0] < age) {
+    i += 1;
+  }
+  const [a0, v0] = knots[i];
+  const [a1, v1] = knots[i + 1];
+  const t = (age - a0) / (a1 - a0);
+  return v0.map((val, j) => val + t * (v1[j] - val));
+}
+
+const RGA_DEATH_RATE_ROWS = (() => {
+  const rows = [];
+  for (let age = 18; age <= 100; age += 1) {
+    const [nsMale, nsFemale, sMale, sFemale] = piecewiseLinearRgaValues(age, RGA_DEATH_RATE_KNOTS);
+    rows.push({ age, nsMale, nsFemale, sMale, sFemale });
+  }
+  return rows;
+})();
+
+const RGA_DEATH_RATE_EDITABLE_TEMPLATE = RGA_DEATH_RATE_ROWS.map((r) => ({
+  age: r.age,
+  nsMale: { mode: "percent", value: r.nsMale.toFixed(3) },
+  nsFemale: { mode: "percent", value: r.nsFemale.toFixed(3) },
+  sMale: { mode: "percent", value: r.sMale.toFixed(3) },
+  sFemale: { mode: "percent", value: r.sFemale.toFixed(3) },
+}));
+
+function normalizeRgaMetricCell(cell) {
+  return {
+    mode: cell.mode === "rate" ? "rate" : "percent",
+    value: String(cell.value ?? ""),
+  };
+}
+
+function migrateLegacyRgaRow(row) {
+  if (row.nsMale && typeof row.nsMale === "object" && row.nsMale !== null && "value" in row.nsMale) {
+    return {
+      age: row.age,
+      nsMale: normalizeRgaMetricCell(row.nsMale),
+      nsFemale: normalizeRgaMetricCell(row.nsFemale),
+      sMale: normalizeRgaMetricCell(row.sMale),
+      sFemale: normalizeRgaMetricCell(row.sFemale),
+    };
+  }
+
+  return {
+    age: row.age,
+    nsMale: { mode: "percent", value: String(row.nsMale ?? "") },
+    nsFemale: { mode: "percent", value: String(row.nsFemale ?? "") },
+    sMale: { mode: "percent", value: String(row.sMale ?? "") },
+    sFemale: { mode: "percent", value: String(row.sFemale ?? "") },
+  };
+}
+
+function cloneRgaRateEditableRows() {
+  return RGA_DEATH_RATE_EDITABLE_TEMPLATE.map((row) => ({
+    age: row.age,
+    nsMale: { ...row.nsMale },
+    nsFemale: { ...row.nsFemale },
+    sMale: { ...row.sMale },
+    sFemale: { ...row.sFemale },
+  }));
+}
+
+const RGA_METRIC_FIELDS = [
+  { key: "nsMale", ariaLabel: (age) => `Age ${age} non-smoker male` },
+  { key: "nsFemale", ariaLabel: (age) => `Age ${age} non-smoker female` },
+  { key: "sMale", ariaLabel: (age) => `Age ${age} smoker male` },
+  { key: "sFemale", ariaLabel: (age) => `Age ${age} smoker female` },
+];
+
+function buildAgeBandEditableRowsFromKnots(knots, fractionDigits = 3) {
+  const rows = [];
+  for (let age = 18; age <= 100; age += 1) {
+    const [nsMale, nsFemale, sMale, sFemale] = piecewiseLinearRgaValues(age, knots);
+    rows.push({
+      age,
+      nsMale: { mode: "percent", value: nsMale.toFixed(fractionDigits) },
+      nsFemale: { mode: "percent", value: nsFemale.toFixed(fractionDigits) },
+      sMale: { mode: "percent", value: sMale.toFixed(fractionDigits) },
+      sFemale: { mode: "percent", value: sFemale.toFixed(fractionDigits) },
+    });
+  }
+  return rows;
+}
+
+function createUniformPercentAgeBandRows(valueStr) {
+  const rows = [];
+  for (let age = 18; age <= 100; age += 1) {
+    rows.push({
+      age,
+      nsMale: { mode: "percent", value: valueStr },
+      nsFemale: { mode: "percent", value: valueStr },
+      sMale: { mode: "percent", value: valueStr },
+      sFemale: { mode: "percent", value: valueStr },
+    });
+  }
+  return rows;
+}
+
+/** Sample treaty-style knots from pricing worksheets; ages 18–100 filled by interpolation. */
+const WAIVER_CONTRIBUTION_DEATH_RATE_KNOTS = [
+  [18, [0.059, 0.018, 0.078, 0.031]],
+  [25, [0.06, 0.021, 0.076, 0.034]],
+  [100, [0.06, 0.021, 0.076, 0.034]],
+];
+
+const ACCIDENTAL_DEATH_BENEFIT_KNOTS = [
+  [18, [0.31, 0.31, 0.31, 0.31]],
+  [24, [0.31, 0.31, 0.31, 0.31]],
+  [25, [0.3, 0.3, 0.3, 0.3]],
+  [26, [0.29, 0.29, 0.29, 0.29]],
+  [27, [0.28, 0.28, 0.28, 0.28]],
+  [100, [0.12, 0.12, 0.12, 0.12]],
+];
+
+const ACCIDENTAL_TPD_KNOTS = [
+  [18, [0.27, 0.27, 0.27, 0.27]],
+  [100, [0.27, 0.27, 0.27, 0.27]],
+];
+
+const CRITICAL_ILLNESS_ACCELERATED_KNOTS = [
+  [18, [0.29, 0.25, 0.33, 0.26]],
+  [19, [0.29, 0.27, 0.33, 0.28]],
+  [20, [0.32, 0.28, 0.35, 0.3]],
+  [21, [0.33, 0.3, 0.37, 0.32]],
+  [22, [0.34, 0.32, 0.38, 0.34]],
+  [23, [0.35, 0.34, 0.4, 0.36]],
+  [24, [0.37, 0.37, 0.42, 0.39]],
+  [25, [0.38, 0.39, 0.43, 0.42]],
+  [26, [0.43, 0.42, 0.48, 0.44]],
+  [27, [0.45, 0.45, 0.51, 0.48]],
+  [100, [0.45, 0.45, 0.51, 0.48]],
+];
+
+const PERMANENT_DISABILITY_ACCELERATED_KNOTS = [
+  [18, [0.049, 0.015, 0.065, 0.026]],
+  [20, [0.047, 0.015, 0.061, 0.025]],
+  [25, [0.05, 0.018, 0.064, 0.029]],
+  [27, [0.052, 0.02, 0.068, 0.031]],
+  [100, [0.052, 0.02, 0.068, 0.031]],
+];
+
+/** Hospital Cash Benefit — used aggregate rates (worksheet sample: 18–24 → 28.2, 25+ → 38.49). */
+const HOSPITAL_CASH_AGGREGATE_KNOTS = [
+  [18, [28.2, 28.2, 28.2, 28.2]],
+  [24, [28.2, 28.2, 28.2, 28.2]],
+  [25, [38.49, 38.49, 38.49, 38.49]],
+  [100, [38.49, 38.49, 38.49, 38.49]],
+];
+
+/** Family Income Benefit — sample knots from pricing sheet; ages after last knot hold flat. */
+const FAMILY_INCOME_BENEFIT_KNOTS = [
+  [18, [0.39, 0.116, 0.516, 0.204]],
+  [20, [0.372, 0.117, 0.488, 0.2]],
+  [25, [0.396, 0.138, 0.506, 0.226]],
+  [27, [0.413, 0.16, 0.537, 0.243]],
+  [100, [0.413, 0.16, 0.537, 0.243]],
+];
+
+const AGE_BAND_RATE_TABLE_TEMPLATE_ROWS = {
+  "waiver-contribution": buildAgeBandEditableRowsFromKnots(WAIVER_CONTRIBUTION_DEATH_RATE_KNOTS, 3),
+  "accidental-death": buildAgeBandEditableRowsFromKnots(ACCIDENTAL_DEATH_BENEFIT_KNOTS, 2),
+  "accidental-tpd": buildAgeBandEditableRowsFromKnots(ACCIDENTAL_TPD_KNOTS, 2),
+  "critical-illness-accelerated": buildAgeBandEditableRowsFromKnots(CRITICAL_ILLNESS_ACCELERATED_KNOTS, 2),
+  "permanent-disability-accelerated": buildAgeBandEditableRowsFromKnots(PERMANENT_DISABILITY_ACCELERATED_KNOTS, 3),
+  "total-permanent-disability-accelerated": createUniformPercentAgeBandRows("15"),
+  "wakalah-charge-death": createUniformPercentAgeBandRows("15"),
+  "hospital-cash-aggregate": buildAgeBandEditableRowsFromKnots(HOSPITAL_CASH_AGGREGATE_KNOTS, 2),
+  "family-income-benefit": buildAgeBandEditableRowsFromKnots(FAMILY_INCOME_BENEFIT_KNOTS, 3),
+};
+
+const PRODUCT_AGE_BAND_RATE_TABLES = [
+  {
+    id: "waiver-contribution",
+    tabLabel: "Waiver of contribution",
+    title: "Waiver of Contribution",
+    subtitle: "% of death rates",
+    regionAriaLabel: "Waiver of contribution rates by age, editable",
+  },
+  {
+    id: "accidental-death",
+    tabLabel: "Accidental death",
+    title: "Accidental Death Benefit",
+    subtitle: null,
+    regionAriaLabel: "Accidental death benefit rates by age, editable",
+  },
+  {
+    id: "accidental-tpd",
+    tabLabel: "Accidental TPD",
+    title: "Accidental Total or Partial Permanent Disability",
+    subtitle: null,
+    regionAriaLabel: "Accidental TPD rates by age, editable",
+  },
+  {
+    id: "critical-illness-accelerated",
+    tabLabel: "Critical illness (accelerated)",
+    title: "Critical Illness (Accelerated)",
+    subtitle: null,
+    regionAriaLabel: "Critical illness accelerated rates by age, editable",
+  },
+  {
+    id: "permanent-disability-accelerated",
+    tabLabel: "Permanent disability (accelerated)",
+    title: "Permanent Disability (Accelerated)",
+    subtitle: null,
+    regionAriaLabel: "Permanent disability accelerated rates by age, editable",
+  },
+  {
+    id: "total-permanent-disability-accelerated",
+    tabLabel: "TPD (accelerated)",
+    title: "Total and Permanent Disability (Accelerated)",
+    subtitle: null,
+    regionAriaLabel: "Total and permanent disability accelerated rates by age, editable",
+  },
+  {
+    id: "wakalah-charge-death",
+    tabLabel: "Wakalah charge — death",
+    title: "Wakalah Charge (% of MC)",
+    subtitle: "Death",
+    regionAriaLabel: "Wakalah charge death rates by age, editable",
+  },
+  {
+    id: "hospital-cash-aggregate",
+    tabLabel: "Hospital cash (aggregate)",
+    title: "Hospital Cash Benefit",
+    subtitle: "Used aggregate rates",
+    regionAriaLabel: "Hospital cash benefit aggregate rates by age, editable",
+  },
+  {
+    id: "family-income-benefit",
+    tabLabel: "Family income benefit",
+    title: "Family Income Benefit",
+    subtitle: null,
+    regionAriaLabel: "Family income benefit rates by age, editable",
+  },
+];
+
+const PLAN_CHARGE_YEAR_ROWS = 30;
+
+const PRODUCT_PLAN_CHARGE_TABLES = [
+  {
+    id: "establishment-charge",
+    chipLabel: "Establishment charge",
+    title: "Establishment Charge",
+    subtitle: "By plan year",
+    regionAriaLabel: "Establishment charge by plan year, editable",
+    dataColumns: [{ key: "chargePct", header: "Charge %", cellKind: "metric" }],
+  },
+  {
+    id: "encashment-charge",
+    chipLabel: "Encashment charge",
+    title: "Encashment Charge",
+    subtitle: "By plan year",
+    regionAriaLabel: "Encashment charge by plan year, editable",
+    dataColumns: [{ key: "chargePct", header: "Charge %", cellKind: "metric" }],
+  },
+  {
+    id: "allocation-charge",
+    chipLabel: "Allocation charge",
+    title: "Allocation Charge",
+    subtitle: "By plan year",
+    regionAriaLabel: "Allocation charge by plan year, editable",
+    dataColumns: [
+      { key: "chargePct", header: "Charge %", cellKind: "metric" },
+      { key: "bonusAllocation", header: "Bonus allocation", cellKind: "metric" },
+      { key: "totalChargePct", header: "Total charge %", cellKind: "metric" },
+    ],
+  },
+  {
+    id: "fund-management-charge",
+    chipLabel: "Fund management charge",
+    title: "Fund Management Charge",
+    subtitle: "By plan year",
+    regionAriaLabel: "Fund management charge by plan year, editable",
+    dataColumns: [
+      { key: "chargePct", header: "Charge %", cellKind: "metric" },
+      { key: "loyaltyBonus", header: "Loyalty bonus %", cellKind: "metric" },
+      { key: "totalChargePct", header: "Total charge %", cellKind: "metric" },
+    ],
+  },
+  {
+    id: "administrative-charge",
+    chipLabel: "Administrative charge",
+    title: "Administrative Charge",
+    subtitle: "By plan year",
+    regionAriaLabel: "Administrative charge by plan year, editable",
+    dataColumns: [
+      { key: "aed", header: "AED", cellKind: "amount" },
+      { key: "usd", header: "USD", cellKind: "amount" },
+    ],
+  },
+  {
+    id: "top-up-allocation-charge",
+    chipLabel: "Top-up allocation charge",
+    title: "Top-Up Allocation Charge",
+    subtitle: "By plan year",
+    regionAriaLabel: "Top-up allocation charge by plan year, editable",
+    dataColumns: [{ key: "chargePct", header: "Charge %", cellKind: "metric" }],
+  },
+  {
+    id: "encashment-process-fee",
+    chipLabel: "Encashment process fee",
+    title: "Encashment Process Fee",
+    subtitle: "By plan year",
+    regionAriaLabel: "Encashment process fee by plan year, editable",
+    dataColumns: [
+      { key: "aed", header: "AED", cellKind: "amount" },
+      { key: "usd", header: "USD", cellKind: "amount" },
+    ],
+  },
+];
+
+function buildEstablishmentChargeTemplate() {
+  return Array.from({ length: PLAN_CHARGE_YEAR_ROWS }, (_, i) => {
+    const planYear = i + 1;
+    return {
+      planYear,
+      chargePct: { mode: "percent", value: planYear <= 5 ? "11" : "0" },
+    };
+  });
+}
+
+function buildEncashmentChargeTemplate() {
+  return Array.from({ length: PLAN_CHARGE_YEAR_ROWS }, (_, i) => {
+    const planYear = i + 1;
+    return {
+      planYear,
+      chargePct: { mode: "percent", value: planYear <= 5 ? "10" : "0" },
+    };
+  });
+}
+
+function buildAllocationChargeTemplate() {
+  return Array.from({ length: PLAN_CHARGE_YEAR_ROWS }, (_, i) => {
+    const planYear = i + 1;
+    const high = planYear <= 5;
+    return {
+      planYear,
+      chargePct: { mode: "percent", value: high ? "15" : "0" },
+      bonusAllocation: { mode: "percent", value: "0" },
+      totalChargePct: { mode: "percent", value: high ? "15" : "0" },
+    };
+  });
+}
+
+function buildFundManagementChargeTemplate() {
+  return Array.from({ length: PLAN_CHARGE_YEAR_ROWS }, (_, i) => ({
+    planYear: i + 1,
+    chargePct: { mode: "percent", value: "2" },
+    loyaltyBonus: { mode: "percent", value: "0" },
+    totalChargePct: { mode: "percent", value: "2" },
+  }));
+}
+
+function buildAdministrativeChargeTemplate() {
+  return Array.from({ length: PLAN_CHARGE_YEAR_ROWS }, (_, i) => ({
+    planYear: i + 1,
+    aed: { mode: "rate", value: "40" },
+    usd: { mode: "rate", value: "11" },
+  }));
+}
+
+function buildTopUpAllocationChargeTemplate() {
+  return Array.from({ length: PLAN_CHARGE_YEAR_ROWS }, (_, i) => ({
+    planYear: i + 1,
+    chargePct: { mode: "percent", value: "7.5" },
+  }));
+}
+
+function buildEncashmentProcessFeeTemplate() {
+  return Array.from({ length: PLAN_CHARGE_YEAR_ROWS }, (_, i) => ({
+    planYear: i + 1,
+    aed: { mode: "rate", value: "100" },
+    usd: { mode: "rate", value: "30" },
+  }));
+}
+
+const PLAN_CHARGE_TEMPLATE_BY_ID = {
+  "establishment-charge": buildEstablishmentChargeTemplate,
+  "encashment-charge": buildEncashmentChargeTemplate,
+  "allocation-charge": buildAllocationChargeTemplate,
+  "fund-management-charge": buildFundManagementChargeTemplate,
+  "administrative-charge": buildAdministrativeChargeTemplate,
+  "top-up-allocation-charge": buildTopUpAllocationChargeTemplate,
+  "encashment-process-fee": buildEncashmentProcessFeeTemplate,
+};
+
+function clonePlanChargeRow(row) {
+  const out = { planYear: row.planYear };
+  for (const key of Object.keys(row)) {
+    if (key === "planYear") {
+      continue;
+    }
+    const c = row[key];
+    out[key] = typeof c === "object" && c !== null && "value" in c ? { ...c } : c;
+  }
+  return out;
+}
+
+function clonePlanChargeRows(rows) {
+  return rows.map(clonePlanChargeRow);
+}
+
+function clonePlanChargeTemplateById(chargeId) {
+  return clonePlanChargeRows(PLAN_CHARGE_TEMPLATE_BY_ID[chargeId]());
+}
+
+/** Monthly discount curve template (geometric step; month 0 = 1). */
+const DISCOUNT_MONTHLY_FACTOR = 0.99839;
+const DISCOUNT_SCHEDULE_MONTHS = 360;
+
+function buildDiscountScheduleTemplate() {
+  const rows = [];
+  for (let monthIndex = 0; monthIndex < DISCOUNT_SCHEDULE_MONTHS; monthIndex += 1) {
+    let policyMonth = 0;
+    let policyYear = 0;
+    if (monthIndex > 0) {
+      policyMonth = ((monthIndex - 1) % 12) + 1;
+      policyYear = Math.floor((monthIndex - 1) / 12) + 1;
+    }
+    const factor = monthIndex === 0 ? "1.00000" : (DISCOUNT_MONTHLY_FACTOR ** monthIndex).toFixed(5);
+    rows.push({ monthIndex, policyMonth, policyYear, factor });
+  }
+  return rows;
+}
+
+/** Chips under Product details → Rates (RGA + age-band rider grids). */
+const CHARGE_TAB_CHIP_ITEMS_AGE_BAND = [
+  { id: "rga-rates", label: "RGA rates" },
+  ...PRODUCT_AGE_BAND_RATE_TABLES.map((t) => ({ id: t.id, label: t.tabLabel })),
+];
+
+/** Chips under Product details → Charges (plan-year fees + discount schedule). */
+const CHARGE_TAB_CHIP_ITEMS_PLAN = [
+  ...PRODUCT_PLAN_CHARGE_TABLES.map((t) => ({ id: t.id, label: t.chipLabel })),
+  { id: "discount-rate", label: "Discount rate" },
+];
+
+const DEFAULT_CHARGES_TWO_TABLE_ID = PRODUCT_PLAN_CHARGE_TABLES[0]?.id ?? "discount-rate";
+
+function cloneAgeBandEditableRows(rows) {
+  return rows.map((row) => ({
+    age: row.age,
+    nsMale: { ...row.nsMale },
+    nsFemale: { ...row.nsFemale },
+    sMale: { ...row.sMale },
+    sFemale: { ...row.sFemale },
+  }));
+}
+
+function cloneAgeBandTemplateRowsById(tableId) {
+  return cloneAgeBandEditableRows(AGE_BAND_RATE_TABLE_TEMPLATE_ROWS[tableId]);
+}
+
 const blankLife = {
-  full_name: "",
   dob: "",
   gender: "",
   smoker_status: "",
@@ -525,14 +1089,13 @@ function SelectField({ label, value, onChange, options }) {
   return (
     <label className="field">
       <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        <option value="">Select</option>
-        {options.map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
+      <DropdownSelect
+        value={value ?? ""}
+        onChange={onChange}
+        options={options}
+        placeholder="Select"
+        emptyOptionLabel="Select"
+      />
     </label>
   );
 }
@@ -1827,6 +2390,12 @@ function PolicyIssuedStep({ firstLife, secondLife, secondLifeSelection, policy, 
   );
 }
 
+function distributorRecordDetailType(item) {
+  if (item.id.startsWith("P-")) return "policy";
+  if (item.status.includes("Underwriter")) return "referral";
+  return "quote";
+}
+
 function LoginPage({ portal, onLogin }) {
   const isDistributor = portal === "distributor";
   const portalTitle = isDistributor ? "Distributor Portal" : "Underwriter Portal";
@@ -1876,7 +2445,8 @@ function LoginPage({ portal, onLogin }) {
   );
 }
 
-function QuoteApplicationPage({ onBack }) {
+function QuoteApplicationPage() {
+  const navigate = useNavigate();
   const [firstLife, setFirstLife] = useState(uaeMockFirstLife);
   const [secondLife, setSecondLife] = useState(uaeMockSecondLife);
   const [secondLifeSelection, setSecondLifeSelection] = useState("Yes");
@@ -1946,13 +2516,13 @@ function QuoteApplicationPage({ onBack }) {
     <main className="portal quote-page">
       <section className="quote-builder">
         <div className="section-heading sticky-heading">
-          <div>
-            <p className="eyebrow">New quote</p>
-            <h2>Life Insurance Application</h2>
-          </div>
-          <button className="secondary-button" type="button" onClick={onBack}>
-            Back to Dashboard
-          </button>
+          <PageTitleWithBack
+            backAriaLabel="Quote and policy workspace"
+            eyebrow="New quote"
+            onBack={() => navigate("/distributor")}
+            title="Life Insurance Application"
+            titleAs="h2"
+          />
         </div>
 
         <nav className="application-stepper" aria-label="Application steps">
@@ -2122,14 +2692,14 @@ function DashboardDetailsPage({ item, type, onBack }) {
     <main className="portal details-page">
       <section className="detail-progress-card">
         <div className="section-heading">
-          <div>
-            <p className="eyebrow">{recordLabel} workspace</p>
-            <h2>{pageTitle}</h2>
-            <p>{item.id} - {item.customer}</p>
-          </div>
-          <button className="secondary-button" type="button" onClick={onBack}>
-            Back to Workspace
-          </button>
+          <PageTitleWithBack
+            backAriaLabel="Quote and policy workspace"
+            eyebrow={`${recordLabel} workspace`}
+            onBack={onBack}
+            subtitle={<p>{item.id} - {item.customer}</p>}
+            title={pageTitle}
+            titleAs="h2"
+          />
         </div>
 
         <nav className="application-stepper detail-stepper" aria-label={`${recordLabel} progress steps`}>
@@ -2249,11 +2819,22 @@ function DashboardDetailsPage({ item, type, onBack }) {
   );
 }
 
-function DistributorPortal({ onCreateQuote }) {
+function DistributorRecordPage() {
+  const { recordId } = useParams();
+  const navigate = useNavigate();
+  const item = initialQuotes.find((quote) => quote.id === recordId);
+  if (!item) {
+    return <Navigate to="/distributor" replace />;
+  }
+  const type = distributorRecordDetailType(item);
+  return <DashboardDetailsPage item={item} type={type} onBack={() => navigate("/distributor")} />;
+}
+
+function DistributorPortal() {
+  const navigate = useNavigate();
   const [activeDashboardTab, setActiveDashboardTab] = useState("quotes");
   const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [workspaceStatusFilter, setWorkspaceStatusFilter] = useState("All statuses");
-  const [selectedDetail, setSelectedDetail] = useState(null);
   const metrics = [
     { label: "Active Quotes", value: "42", trend: "+12% this month", series: [25, 29, 31, 34, 36, 39, 42] },
     { label: "Policies Issued", value: "18", trend: "AED 2.4M cover", series: [8, 9, 11, 10, 14, 16, 18] },
@@ -2277,17 +2858,6 @@ function DistributorPortal({ onCreateQuote }) {
 
     return matchesSearch && matchesStatus;
   });
-  const detailType = activeDashboardTab === "policies" ? "policy" : activeDashboardTab === "referrals" ? "referral" : "quote";
-
-  if (selectedDetail) {
-    return (
-      <DashboardDetailsPage
-        item={selectedDetail.item}
-        type={selectedDetail.type}
-        onBack={() => setSelectedDetail(null)}
-      />
-    );
-  }
 
   return (
     <main className="portal">
@@ -2299,7 +2869,7 @@ function DistributorPortal({ onCreateQuote }) {
               <h1>Quote and policy workspace</h1>
               <p>Track pipeline performance, create illustrations, and prepare cases for underwriting.</p>
             </div>
-            <button className="primary-button" type="button" onClick={onCreateQuote}>
+            <button className="primary-button" type="button" onClick={() => navigate("/distributor/quote")}>
               Create New Quote
             </button>
           </section>
@@ -2347,16 +2917,7 @@ function DistributorPortal({ onCreateQuote }) {
                 </label>
                 <label>
                   <span>Filter</span>
-                  <select
-                    value={workspaceStatusFilter}
-                    onChange={(event) => setWorkspaceStatusFilter(event.target.value)}
-                  >
-                    {statusOptions.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </select>
+                  <DropdownSelect value={workspaceStatusFilter} onChange={setWorkspaceStatusFilter} options={statusOptions} />
                 </label>
               </div>
             </div>
@@ -2385,7 +2946,7 @@ function DistributorPortal({ onCreateQuote }) {
                     <button
                       className="table-action-button"
                       type="button"
-                      onClick={() => setSelectedDetail({ item: quote, type: detailType })}
+                      onClick={() => navigate(`/distributor/record/${quote.id}`)}
                     >
                       View Details
                     </button>
@@ -2401,108 +2962,1426 @@ function DistributorPortal({ onCreateQuote }) {
   );
 }
 
-function UnderwriterPortal() {
-  const cases = [
+function PlanChargeMetricCell({ cell, ariaLabel, onPatch }) {
+  const normalized = normalizeRgaMetricCell(cell);
+  return (
+    <div className="benefit-pricing-matrix-cell-row rga-rates-matrix-cell-row">
+      <div className="benefit-pricing-matrix-inline-group">
+        <DropdownSelect
+          variant="compact"
+          className="benefit-pricing-matrix-inline-select rga-rates-mode-select"
+          aria-label={`${ariaLabel} type`}
+          value={normalized.mode === "rate" ? "rate" : "percent"}
+          options={[
+            { value: "percent", label: "%" },
+            { value: "rate", label: "Rate" },
+          ]}
+          onChange={(val) => onPatch({ mode: val === "rate" ? "rate" : "percent" })}
+        />
+      </div>
+      <div className="benefit-pricing-matrix-inline-group">
+        <input
+          className="benefit-pricing-matrix-inline-input"
+          type="text"
+          inputMode="decimal"
+          value={normalized.value}
+          aria-label={`${ariaLabel} value`}
+          onChange={(event) => onPatch({ value: event.target.value })}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PlanChargeAmountCell({ value, ariaLabel, onChange }) {
+  return (
+    <input
+      className="benefit-pricing-matrix-inline-input plan-charge-amount-input"
+      type="text"
+      inputMode="decimal"
+      value={value}
+      aria-label={ariaLabel}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  );
+}
+
+function ProductPlanYearChargeTable({ title, subtitle, regionAriaLabel, dataColumns, rows, onUpdateCell }) {
+  return (
+    <div className="product-detail-content product-detail-content--full">
+      <section className="product-detail-card rga-rates-card">
+        <header className="rga-rates-header">
+          <div>
+            <h3 className="rga-rates-title">{title}</h3>
+            {subtitle ? <p className="rga-rates-category">{subtitle}</p> : null}
+          </div>
+          <span className="pill subtle">
+            Plan years 1–{PLAN_CHARGE_YEAR_ROWS}
+          </span>
+        </header>
+        <div className="rga-rates-scroll" role="region" aria-label={regionAriaLabel}>
+          <table className="rga-rates-matrix plan-charge-year-matrix">
+            <thead>
+              <tr>
+                <th scope="col" className="rga-rates-matrix-corner plan-charge-year-matrix-corner">
+                  Plan year
+                </th>
+                {dataColumns.map((col) => (
+                  <th key={col.key} scope="col" className="rga-rates-matrix-sub">
+                    {col.header}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.planYear}>
+                  <th scope="row" className="rga-rates-matrix-age">
+                    {r.planYear}
+                  </th>
+                  {dataColumns.map((col) => (
+                    <td key={col.key} className="rga-rates-matrix-input-cell">
+                      {col.cellKind === "metric" ? (
+                        <PlanChargeMetricCell
+                          cell={r[col.key]}
+                          ariaLabel={`Plan year ${r.planYear} ${col.header}`}
+                          onPatch={(patch) => onUpdateCell(r.planYear, col.key, patch)}
+                        />
+                      ) : (
+                        <PlanChargeAmountCell
+                          value={r[col.key]?.value ?? ""}
+                          ariaLabel={`Plan year ${r.planYear} ${col.header}`}
+                          onChange={(value) => onUpdateCell(r.planYear, col.key, { mode: "rate", value })}
+                        />
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProductDiscountScheduleTable({ rows, regionAriaLabel, onUpdateFactor }) {
+  return (
+    <div className="product-detail-content product-detail-content--full">
+      <section className="product-detail-card rga-rates-card">
+        <header className="rga-rates-header">
+          <div>
+            <h3 className="rga-rates-title">Discount Rate</h3>
+            <p className="rga-rates-category">Monthly discount factors</p>
+          </div>
+          <span className="pill subtle">{DISCOUNT_SCHEDULE_MONTHS} months</span>
+        </header>
+        <div className="rga-rates-scroll" role="region" aria-label={regionAriaLabel}>
+          <table className="rga-rates-matrix plan-charge-year-matrix">
+            <thead>
+              <tr>
+                <th scope="col" className="rga-rates-matrix-corner plan-charge-year-matrix-corner">
+                  Month
+                </th>
+                <th scope="col" className="rga-rates-matrix-sub">
+                  Year
+                </th>
+                <th scope="col" className="rga-rates-matrix-sub">
+                  Discount factor
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.monthIndex}>
+                  <th scope="row" className="rga-rates-matrix-age">
+                    {r.policyMonth}
+                  </th>
+                  <td className="rga-rates-matrix-age plan-charge-discount-year-cell">{r.policyYear}</td>
+                  <td className="rga-rates-matrix-input-cell">
+                    <input
+                      className="benefit-pricing-matrix-inline-input"
+                      type="text"
+                      inputMode="decimal"
+                      value={r.factor}
+                      aria-label={`Policy month ${r.policyMonth} year ${r.policyYear} discount factor`}
+                      onChange={(event) => onUpdateFactor(r.monthIndex, event.target.value)}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProductAgeBandRateMatrixSection({ title, subtitle, rows, ariaRegionLabel, onUpdateCell }) {
+  return (
+    <div className="product-detail-content product-detail-content--full">
+      <section className="product-detail-card rga-rates-card">
+        <header className="rga-rates-header">
+          <div>
+            <h3 className="rga-rates-title">{title}</h3>
+            {subtitle ? <p className="rga-rates-category">{subtitle}</p> : null}
+          </div>
+          <span className="pill subtle">Ages 18–100</span>
+        </header>
+        <div className="rga-rates-scroll" role="region" aria-label={ariaRegionLabel}>
+          <table className="rga-rates-matrix">
+            <thead>
+              <tr>
+                <th rowSpan={2} scope="col" className="rga-rates-matrix-corner">
+                  Age
+                </th>
+                <th colSpan={2} scope="colgroup" className="rga-rates-matrix-group">
+                  Non-smoker
+                </th>
+                <th colSpan={2} scope="colgroup" className="rga-rates-matrix-group rga-rates-matrix-group--smoker">
+                  Smoker
+                </th>
+              </tr>
+              <tr>
+                <th scope="col" className="rga-rates-matrix-sub">
+                  Male
+                </th>
+                <th scope="col" className="rga-rates-matrix-sub">
+                  Female
+                </th>
+                <th scope="col" className="rga-rates-matrix-sub">
+                  Male
+                </th>
+                <th scope="col" className="rga-rates-matrix-sub">
+                  Female
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.age}>
+                  <th scope="row" className="rga-rates-matrix-age">
+                    {r.age}
+                  </th>
+                  {RGA_METRIC_FIELDS.map(({ key, ariaLabel }) => {
+                    const cell = normalizeRgaMetricCell(r[key]);
+                    return (
+                      <td key={key} className="rga-rates-matrix-input-cell">
+                        <div className="benefit-pricing-matrix-cell-row rga-rates-matrix-cell-row">
+                          <div className="benefit-pricing-matrix-inline-group">
+                            <DropdownSelect
+                              variant="compact"
+                              className="benefit-pricing-matrix-inline-select rga-rates-mode-select"
+                              aria-label={`${ariaLabel(r.age)} type`}
+                              value={cell.mode === "rate" ? "rate" : "percent"}
+                              options={[
+                                { value: "percent", label: "%" },
+                                { value: "rate", label: "Rate" },
+                              ]}
+                              onChange={(val) =>
+                                onUpdateCell(r.age, key, {
+                                  mode: val === "rate" ? "rate" : "percent",
+                                })
+                              }
+                            />
+                          </div>
+                          <div className="benefit-pricing-matrix-inline-group">
+                            <input
+                              className="benefit-pricing-matrix-inline-input"
+                              type="text"
+                              inputMode="decimal"
+                              value={cell.value}
+                              aria-label={`${ariaLabel(r.age)} value`}
+                              onChange={(event) => onUpdateCell(r.age, key, { value: event.target.value })}
+                            />
+                          </div>
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function ProductConfigurationPage() {
+  const navigate = useNavigate();
+  const { productCode } = useParams();
+  const productTypes = ["Term", "Whole Life", "Endowment", "ULIP", "Takaful", "Group Life"];
+  const riderAbbreviations = {
+    ADB: "Accidental Death Benefit",
+    TPD: "Total Permanent Disability",
+    WOC: "Waiver of Contribution",
+    CI: "Critical Illness",
+    FIB: "Family Income Benefit",
+    HCB: "Hospital Cash Benefit",
+    PPD: "Partial Permanent Disability",
+  };
+  const productList = productCatalog;
+  const selectedProduct = useMemo(() => {
+    if (!productCode) {
+      return null;
+    }
+
+    return productList.find((product) => product.code === productCode) ?? null;
+  }, [productCode, productList]);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [activeBenefit, setActiveBenefit] = useState(productConfigurationBenefits[0]);
+  const [benefitFieldStateByProduct, setBenefitFieldStateByProduct] = useState({});
+  const [rgaRateRowsByProduct, setRgaRateRowsByProduct] = useState({});
+  const [productAgeBandTablesByProduct, setProductAgeBandTablesByProduct] = useState({});
+  const [productPlanChargeRowsByProduct, setProductPlanChargeRowsByProduct] = useState({});
+  const [productDiscountScheduleByProduct, setProductDiscountScheduleByProduct] = useState({});
+  const [productConfigDetailTab, setProductConfigDetailTab] = useState("benefits-pricing");
+  const [selectedChargeRateTableId, setSelectedChargeRateTableId] = useState("rga-rates");
+  const [selectedChargesTwoTableId, setSelectedChargesTwoTableId] = useState(DEFAULT_CHARGES_TWO_TABLE_ID);
+  const [activeProductSection, setActiveProductSection] = useState(0);
+  const [newProduct, setNewProduct] = useState({
+    product_code: "NEW-004",
+    product_name: "",
+    product_type: "Term",
+    currency: "AED",
+    effective_date: "2026-07-01",
+    expiry_date: "",
+    version: "v1.0",
+    description: "",
+    min_entry_age: "18",
+    max_entry_age: "65",
+    min_maturity_age: "25",
+    max_maturity_age: "85",
+    min_contribution: "500",
+    max_contribution: "100000",
+    min_sum_assured: "100000",
+    max_sum_assured: "5000000",
+    monthly_frequency_allowed: "Yes",
+    quarterly_frequency_allowed: "Yes",
+    half_yearly_frequency_allowed: "Yes",
+    annual_frequency_allowed: "Yes",
+    contribution_term_min: "5",
+    contribution_term_max: "20",
+    contribution_policy_term_relation: "Contribution term <= policy term",
+    policy_term_min: "5",
+    policy_term_max: "40",
+    joint_life_allowed: "Yes",
+    top_up_allowed: "No",
+    partial_withdrawal_allowed: "No",
+    surrender_allowed: "Yes",
+    indexation_allowed: "Yes",
+    projection_assumptions: ["0%", "3%", "10%"],
+    rider_eligibility: ["ADB", "TPD", "WOC", "CI"],
+    fund_options: ["Balanced Fund", "Growth Fund", "Sukuk Fund"],
+  });
+
+  useEffect(() => {
+    if (!productCode) {
+      return;
+    }
+
+    setActiveBenefit(productConfigurationBenefits[0]);
+    setProductConfigDetailTab("benefits-pricing");
+    setSelectedChargeRateTableId("rga-rates");
+    setSelectedChargesTwoTableId(DEFAULT_CHARGES_TWO_TABLE_ID);
+    setBenefitFieldStateByProduct((previous) => {
+      if (previous[productCode]) {
+        const migrated = migrateLegacyBenefitLoadingState(previous[productCode], productConfigurationBenefits);
+        if (migrated === previous[productCode]) {
+          return previous;
+        }
+
+        return { ...previous, [productCode]: migrated };
+      }
+
+      return {
+        ...previous,
+        [productCode]: createBenefitLoadingState(productConfigurationBenefits),
+      };
+    });
+    setRgaRateRowsByProduct((previous) => {
+      const existing = previous[productCode];
+      if (existing) {
+        if (existing[0] && typeof existing[0].nsMale === "string") {
+          return { ...previous, [productCode]: existing.map(migrateLegacyRgaRow) };
+        }
+
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [productCode]: cloneRgaRateEditableRows(),
+      };
+    });
+    setProductAgeBandTablesByProduct((previous) => {
+      const existing = previous[productCode];
+      const seeded = {};
+      let needsWrite = !existing;
+
+      for (const { id } of PRODUCT_AGE_BAND_RATE_TABLES) {
+        const rows = existing?.[id];
+        if (!rows) {
+          seeded[id] = cloneAgeBandTemplateRowsById(id);
+          needsWrite = true;
+        } else if (rows[0] && typeof rows[0].nsMale === "string") {
+          seeded[id] = rows.map(migrateLegacyRgaRow);
+          needsWrite = true;
+        } else {
+          seeded[id] = rows;
+        }
+      }
+
+      if (!needsWrite) {
+        return previous;
+      }
+
+      return { ...previous, [productCode]: seeded };
+    });
+    setProductPlanChargeRowsByProduct((previous) => {
+      const existing = previous[productCode];
+      const seeded = {};
+      let needsWrite = !existing;
+
+      for (const { id } of PRODUCT_PLAN_CHARGE_TABLES) {
+        const rows = existing?.[id];
+        if (!rows) {
+          seeded[id] = clonePlanChargeTemplateById(id);
+          needsWrite = true;
+        } else {
+          seeded[id] = rows;
+        }
+      }
+
+      if (!needsWrite) {
+        return previous;
+      }
+
+      return { ...previous, [productCode]: seeded };
+    });
+    setProductDiscountScheduleByProduct((previous) => {
+      if (previous[productCode]) {
+        return previous;
+      }
+
+      return {
+        ...previous,
+        [productCode]: buildDiscountScheduleTemplate(),
+      };
+    });
+  }, [productCode]);
+
+  const benefitFieldsForProduct = useMemo(() => {
+    if (!productCode) {
+      return null;
+    }
+
+    return migrateLegacyBenefitLoadingState(
+      benefitFieldStateByProduct[productCode],
+      productConfigurationBenefits
+    );
+  }, [productCode, benefitFieldStateByProduct]);
+
+  const rgaRowsForProduct = useMemo(() => {
+    const raw = !productCode ? null : rgaRateRowsByProduct[productCode];
+    const rows = raw || cloneRgaRateEditableRows();
+    if (rows[0] && typeof rows[0].nsMale === "string") {
+      return rows.map(migrateLegacyRgaRow);
+    }
+
+    return rows;
+  }, [productCode, rgaRateRowsByProduct]);
+
+  const ageBandRowsByIdForProduct = useMemo(() => {
+    if (!productCode) {
+      return {};
+    }
+
+    const pack = productAgeBandTablesByProduct[productCode];
+    const out = {};
+    for (const { id } of PRODUCT_AGE_BAND_RATE_TABLES) {
+      const raw = pack?.[id] || AGE_BAND_RATE_TABLE_TEMPLATE_ROWS[id];
+      out[id] = raw[0] && typeof raw[0].nsMale === "string" ? raw.map(migrateLegacyRgaRow) : raw;
+    }
+
+    return out;
+  }, [productCode, productAgeBandTablesByProduct]);
+
+  const planChargeRowsByIdForProduct = useMemo(() => {
+    if (!productCode) {
+      return {};
+    }
+
+    const pack = productPlanChargeRowsByProduct[productCode];
+    const out = {};
+    for (const { id } of PRODUCT_PLAN_CHARGE_TABLES) {
+      out[id] = pack?.[id] || PLAN_CHARGE_TEMPLATE_BY_ID[id]();
+    }
+
+    return out;
+  }, [productCode, productPlanChargeRowsByProduct]);
+
+  const discountScheduleRowsForProduct = useMemo(() => {
+    if (!productCode) {
+      return [];
+    }
+
+    return productDiscountScheduleByProduct[productCode] || buildDiscountScheduleTemplate();
+  }, [productCode, productDiscountScheduleByProduct]);
+
+  const productSections = [
     {
-      id: "UW-2103",
-      applicant: "Aarav Mehta",
-      product: "SecureLife Protector",
-      risk: "Medium",
-      checks: "Medical evidence pending",
+      title: "Product Identity and Versioning",
+      description: "Core product identity, type, currency, effective dating, and version controls.",
+      groups: [
+        {
+          title: "Basic Product Identity",
+          fields: [
+            { name: "product_code", label: "Product Code" },
+            { name: "product_name", label: "Product Name" },
+            { name: "product_type", label: "Product Type", type: "select", options: productTypes },
+            { name: "currency", label: "Currency", type: "select", options: ["AED", "USD"] },
+          ],
+        },
+        {
+          title: "Version Validity",
+          fields: [
+            { name: "effective_date", label: "Effective Date", type: "date" },
+            { name: "expiry_date", label: "Expiry Date", type: "date" },
+            { name: "version", label: "Version" },
+          ],
+        },
+        {
+          title: "Product Description",
+          fields: [
+            { name: "description", label: "Description", type: "textarea" },
+          ],
+        },
+      ],
     },
     {
-      id: "UW-2102",
-      applicant: "Fatima Khan",
-      product: "Takaful Family Shield",
-      risk: "High",
-      checks: "Residency referral",
+      title: "Eligibility and Product Rules",
+      description: "Age, maturity, contribution, sum assured, term, frequency, and servicing feature rules.",
+      groups: [
+        {
+          title: "Age and Maturity Eligibility",
+          fields: [
+            { name: "min_entry_age", label: "Minimum Entry Age", type: "number" },
+            { name: "max_entry_age", label: "Maximum Entry Age", type: "number" },
+            { name: "min_maturity_age", label: "Minimum Maturity Age", type: "number" },
+            { name: "max_maturity_age", label: "Maximum Maturity Age", type: "number" },
+          ],
+        },
+        {
+          title: "Contribution and Sum Assured Limits",
+          fields: [
+            { name: "min_contribution", label: "Minimum Contribution", type: "number" },
+            { name: "max_contribution", label: "Maximum Contribution", type: "number" },
+            { name: "min_sum_assured", label: "Minimum Sum Assured", type: "number" },
+            { name: "max_sum_assured", label: "Maximum Sum Assured", type: "number" },
+          ],
+        },
+        {
+          title: "Term and Frequency Rules",
+          fields: [
+            { name: "monthly_frequency_allowed", label: "Monthly Frequency Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "quarterly_frequency_allowed", label: "Quarterly Frequency Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "half_yearly_frequency_allowed", label: "Half-Yearly Frequency Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "annual_frequency_allowed", label: "Annual Frequency Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "contribution_term_min", label: "Minimum Contribution Term", type: "number" },
+            { name: "contribution_term_max", label: "Maximum Contribution Term", type: "number" },
+            { name: "contribution_policy_term_relation", label: "Contribution / Policy Term Rule", type: "select", options: ["Contribution term <= policy term", "Contribution term = policy term", "Single contribution only"] },
+            { name: "policy_term_min", label: "Minimum Policy Term", type: "number" },
+            { name: "policy_term_max", label: "Maximum Policy Term", type: "number" },
+          ],
+        },
+        {
+          title: "Servicing Feature Switches",
+          fields: [
+            { name: "joint_life_allowed", label: "Joint Life Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "top_up_allowed", label: "Top-up Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "partial_withdrawal_allowed", label: "Partial Withdrawal Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "surrender_allowed", label: "Surrender Allowed", type: "select", options: ["Yes", "No"] },
+            { name: "indexation_allowed", label: "Indexation Allowed", type: "select", options: ["Yes", "No"] },
+          ],
+        },
+      ],
     },
     {
-      id: "UW-2101",
-      applicant: "Lina Santos",
-      product: "FutureWealth Life",
-      risk: "Low",
-      checks: "Ready for decision",
+      title: "Pricing, Projection and Engine Mappings",
+      description: "Business-owned mappings for projection assumptions, riders, and funds without deployment.",
+      groups: [
+        {
+          title: "Projection Assumptions",
+          fields: [
+            { name: "projection_assumptions", label: "Projection Assumptions", type: "multiSelect", options: ["0%", "3%", "5%", "8%", "10%"] },
+          ],
+        },
+        {
+          title: "Rider and Fund Configuration",
+          fields: [
+            { name: "rider_eligibility", label: "Rider Eligibility", type: "multiSelect", options: ["ADB", "TPD", "WOC", "CI", "FIB", "HCB", "PPD"] },
+            { name: "fund_options", label: "Fund Options", type: "multiSelect", options: ["Balanced Fund", "Growth Fund", "Conservative Fund", "Global Equity Fund", "Sukuk Fund", "Money Market Fund"] },
+          ],
+        },
+      ],
     },
   ];
+  const selectedProductSection = productSections[activeProductSection];
+  const getProductSectionFields = (section) =>
+    section.groups.flatMap((group) => group.fields);
+  const productSectionCompletion = productSections.map((section) =>
+    getProductSectionFields(section).every((field) => {
+      const value = newProduct[field.name];
 
-  return (
-    <main className="portal">
-      <div className="hero underwriter">
-        <div>
-          <p className="eyebrow">Underwriter portal</p>
-          <h1>Risk review and decisions</h1>
-          <p>Prioritize referrals, inspect validation flags, and record underwriting outcomes.</p>
-        </div>
-        <button className="primary-button" type="button">
-          Open Work Queue
-        </button>
-      </div>
+      if (Array.isArray(value)) {
+        return value.length > 0;
+      }
 
-      <section className="metric-grid">
-        <article className="metric-card">
-          <span>Open Referrals</span>
-          <strong>13</strong>
-          <small>5 high priority</small>
-        </article>
-        <article className="metric-card">
-          <span>Approved Today</span>
-          <strong>6</strong>
-          <small>2 with loadings</small>
-        </article>
-        <article className="metric-card">
-          <span>SLA Breach Risk</span>
-          <strong>3</strong>
-          <small>Due in 4 hours</small>
-        </article>
-        <article className="metric-card">
-          <span>Avg Decision Time</span>
-          <strong>1.6d</strong>
-          <small>-8% vs last week</small>
-        </article>
-      </section>
+      return String(value || "").trim() !== "";
+    })
+  );
 
-      <section className="panel split-panel">
-        <div>
-          <div className="section-heading">
-            <h2>Underwriting Queue</h2>
-            <span className="pill subtle">Risk sorted</span>
+  function updateProduct(field, value) {
+    setNewProduct((current) => ({ ...current, [field]: value }));
+  }
+
+  function toggleProductOption(field, option) {
+    setNewProduct((current) => {
+      const selectedOptions = current[field] || [];
+      const nextOptions = selectedOptions.includes(option)
+        ? selectedOptions.filter((item) => item !== option)
+        : [...selectedOptions, option];
+
+      return { ...current, [field]: nextOptions };
+    });
+  }
+
+  function updateBenefitPricingCell(benefitName, rowKey, lifeKey, patch) {
+    if (!productCode) {
+      return;
+    }
+
+    setBenefitFieldStateByProduct((previous) => {
+      const productState = migrateLegacyBenefitLoadingState(
+        previous[productCode] || createBenefitLoadingState(productConfigurationBenefits),
+        productConfigurationBenefits
+      );
+      const benefitState = productState[benefitName] || createBenefitLoadingState([benefitName])[benefitName];
+      const row = benefitState[rowKey] || {
+        first: emptyBenefitPricingCell(),
+        second: emptyBenefitPricingCell(),
+      };
+      const cell = row[lifeKey] || emptyBenefitPricingCell();
+      const nextCell = { ...cell, ...patch };
+      nextCell.mode = nextCell.mode === "fixed" ? "fixed" : "percent";
+
+      return {
+        ...previous,
+        [productCode]: {
+          ...productState,
+          [benefitName]: {
+            ...benefitState,
+            [rowKey]: {
+              ...row,
+              [lifeKey]: nextCell,
+            },
+          },
+        },
+      };
+    });
+  }
+
+  function updateRgaRateCell(age, field, patch) {
+    if (!productCode) {
+      return;
+    }
+
+    setRgaRateRowsByProduct((previous) => {
+      const rawIn = previous[productCode] || cloneRgaRateEditableRows();
+      const raw =
+        rawIn[0] && typeof rawIn[0].nsMale === "string" ? rawIn.map(migrateLegacyRgaRow) : rawIn;
+      const rows = raw.map((row) => ({
+        age: row.age,
+        nsMale: { ...row.nsMale },
+        nsFemale: { ...row.nsFemale },
+        sMale: { ...row.sMale },
+        sFemale: { ...row.sFemale },
+      }));
+      const index = rows.findIndex((row) => row.age === age);
+      if (index === -1) {
+        return previous;
+      }
+      const cell = rows[index][field] || { mode: "percent", value: "" };
+      const next = { ...cell, ...patch };
+      next.mode = next.mode === "rate" ? "rate" : "percent";
+      rows[index] = { ...rows[index], [field]: next };
+      return { ...previous, [productCode]: rows };
+    });
+  }
+
+  function updateAgeBandRateCell(tableId, age, field, patch) {
+    if (!productCode) {
+      return;
+    }
+
+    setProductAgeBandTablesByProduct((previous) => {
+      const productTables = previous[productCode] || {};
+      const rawIn = productTables[tableId] || cloneAgeBandTemplateRowsById(tableId);
+      const raw =
+        rawIn[0] && typeof rawIn[0].nsMale === "string" ? rawIn.map(migrateLegacyRgaRow) : rawIn;
+      const rows = raw.map((row) => ({
+        age: row.age,
+        nsMale: { ...row.nsMale },
+        nsFemale: { ...row.nsFemale },
+        sMale: { ...row.sMale },
+        sFemale: { ...row.sFemale },
+      }));
+      const index = rows.findIndex((row) => row.age === age);
+      if (index === -1) {
+        return previous;
+      }
+      const cell = rows[index][field] || { mode: "percent", value: "" };
+      const next = { ...cell, ...patch };
+      next.mode = next.mode === "rate" ? "rate" : "percent";
+      rows[index] = { ...rows[index], [field]: next };
+      return {
+        ...previous,
+        [productCode]: {
+          ...productTables,
+          [tableId]: rows,
+        },
+      };
+    });
+  }
+
+  function updatePlanChargeCell(chargeId, planYear, fieldKey, patch) {
+    if (!productCode) {
+      return;
+    }
+
+    setProductPlanChargeRowsByProduct((previous) => {
+      const productTables = previous[productCode] || {};
+      const rawIn = productTables[chargeId] || clonePlanChargeTemplateById(chargeId);
+      const rows = rawIn.map(clonePlanChargeRow);
+      const index = rows.findIndex((row) => row.planYear === planYear);
+      if (index === -1) {
+        return previous;
+      }
+      const cell = rows[index][fieldKey] || { mode: "percent", value: "" };
+      const next = { ...cell, ...patch };
+      next.mode = next.mode === "rate" ? "rate" : "percent";
+      rows[index] = { ...rows[index], [fieldKey]: next };
+      return {
+        ...previous,
+        [productCode]: {
+          ...productTables,
+          [chargeId]: rows,
+        },
+      };
+    });
+  }
+
+  function updateDiscountScheduleFactor(monthIndex, factor) {
+    if (!productCode) {
+      return;
+    }
+
+    setProductDiscountScheduleByProduct((previous) => {
+      const rawIn = previous[productCode] || buildDiscountScheduleTemplate();
+      const rows = rawIn.map((row) => ({ ...row }));
+      const index = rows.findIndex((row) => row.monthIndex === monthIndex);
+      if (index === -1) {
+        return previous;
+      }
+      rows[index] = { ...rows[index], factor };
+      return { ...previous, [productCode]: rows };
+    });
+  }
+
+  function renderProductField(field) {
+    if (field.type === "multiSelect") {
+      const selectedOptions = newProduct[field.name] || [];
+
+      return (
+        <div className="field multi-select-field" key={field.name}>
+          <span>{field.label}</span>
+          <div className="selected-chip-list">
+            {selectedOptions.map((option) => (
+              <button type="button" key={option} onClick={() => toggleProductOption(field.name, option)}>
+                {option} ×
+              </button>
+            ))}
+            {selectedOptions.length === 0 && <small>No options selected</small>}
           </div>
-          <div className="case-list">
-            {cases.map((item) => (
-              <article className="case-card" key={item.id}>
-                <div>
-                  <strong>{item.id}</strong>
-                  <p>{item.applicant}</p>
-                  <small>{item.product}</small>
-                </div>
-                <span className={`risk risk-${item.risk.toLowerCase()}`}>{item.risk}</span>
-                <p>{item.checks}</p>
-              </article>
+          <div className="multi-select-options">
+            {field.options.map((option) => (
+              <button
+                className={selectedOptions.includes(option) ? "active" : ""}
+                key={option}
+                type="button"
+                title={field.name === "rider_eligibility" ? riderAbbreviations[option] : option}
+                onClick={() => toggleProductOption(field.name, option)}
+              >
+                {option}
+              </button>
             ))}
           </div>
         </div>
-        <aside className="decision-panel">
-          <h3>Decision Capture</h3>
-          <label className="field">
-            <span>Decision</span>
-            <select defaultValue="Request Evidence">
-              <option>Approve Standard</option>
-              <option>Approve With Loading</option>
-              <option>Postpone</option>
-              <option>Decline</option>
-              <option>Request Evidence</option>
-            </select>
-          </label>
-          <label className="field">
-            <span>Underwriting Notes</span>
-            <textarea defaultValue="Awaiting medical report and residency confirmation." />
-          </label>
-          <button className="primary-button" type="button">
-            Save Decision
-          </button>
-        </aside>
-      </section>
+      );
+    }
+
+    if (field.type === "select") {
+      return (
+        <SelectField
+          key={field.name}
+          label={field.label}
+          value={newProduct[field.name]}
+          options={field.options}
+          onChange={(value) => updateProduct(field.name, value)}
+        />
+      );
+    }
+
+    if (field.type === "textarea") {
+      return (
+        <label className="field proposal-field-wide" key={field.name}>
+          <span>{field.label}</span>
+          <textarea value={newProduct[field.name]} onChange={(event) => updateProduct(field.name, event.target.value)} />
+        </label>
+      );
+    }
+
+    return (
+      <TextField
+        key={field.name}
+        label={field.label}
+        type={field.type || "text"}
+        value={newProduct[field.name]}
+        onChange={(value) => updateProduct(field.name, value)}
+      />
+    );
+  }
+
+  const activeBenefitState =
+    benefitFieldsForProduct?.[activeBenefit] ||
+    createBenefitLoadingState([activeBenefit])[activeBenefit];
+  const netFirstLife = computeNetPricingDisplay(activeBenefitState, "first");
+  const netSecondLife = computeNetPricingDisplay(activeBenefitState, "second");
+  const benefitPricingRows = [
+    { key: "highSumCoverDiscount", label: "High Sum Cover Discount" },
+    { key: "otherDiscounts", label: "Other Discounts" },
+    { key: "otherLoadings", label: "Other Loadings" },
+  ];
+
+  return (
+    <main className="portal product-config-page">
+      {productCode && !selectedProduct && (
+        <section className="panel">
+          <div className="section-heading">
+            <PageTitleWithBack
+              backAriaLabel="Product configuration list"
+              eyebrow="Configuration"
+              onBack={() => navigate("/underwriter/products")}
+              subtitle={
+                <p>
+                  No configuration found for product code <strong>{productCode}</strong>.
+                </p>
+              }
+              title="Product not found"
+              titleAs="h2"
+            />
+          </div>
+        </section>
+      )}
+
+      {!productCode && !showCreateForm && (
+        <section className="panel product-list-panel">
+          <div className="section-heading">
+            <PageTitleWithBack
+              backAriaLabel="Underwriting workspace"
+              eyebrow="Configuration"
+              onBack={() => navigate("/underwriter")}
+              subtitle={<p>Select an existing product version or create a new product configuration.</p>}
+              title="Product Configuration Module"
+              titleAs="h2"
+            />
+            <div className="header-actions">
+              <button className="primary-button" type="button" onClick={() => setShowCreateForm(true)}>
+                Create New Product
+              </button>
+            </div>
+          </div>
+          <div className="table product-config-table">
+            <div className="table-row table-head">
+              <span>Product Code</span>
+              <span>Product Name</span>
+              <span>Product Type</span>
+              <span>Currency</span>
+              <span>Version</span>
+              <span>Effective Date</span>
+              <span>Actions</span>
+            </div>
+            {productList.map((product) => (
+              <div className="table-row" key={product.code}>
+                <span>{product.code}</span>
+                <span>{product.name}</span>
+                <span>{product.type}</span>
+                <span>{product.currency}</span>
+                <span>{product.version}</span>
+                <span>{product.effectiveDate}</span>
+                <span>
+                  <button
+                    className="table-action-button"
+                    type="button"
+                    onClick={() => navigate(`/underwriter/products/${encodeURIComponent(product.code)}`)}
+                  >
+                    View Product
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {productCode && selectedProduct && (
+        <section className="panel product-detail-panel">
+          <div className="section-heading">
+            <PageTitleWithBack
+              backAriaLabel="Product configuration list"
+              eyebrow="Product details"
+              onBack={() => navigate("/underwriter/products")}
+              subtitle={
+                <p>
+                  {selectedProduct.code} - {selectedProduct.type} - {selectedProduct.version}
+                </p>
+              }
+              title={selectedProduct.name}
+              titleAs="h2"
+            />
+            <span className="pill subtle">{selectedProduct.currency}</span>
+          </div>
+
+          <div className="dashboard-tabs product-config-detail-tabs" role="tablist" aria-label="Product configuration views">
+            <button
+              className={productConfigDetailTab === "overview" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={productConfigDetailTab === "overview"}
+              onClick={() => setProductConfigDetailTab("overview")}
+            >
+              Product overview
+            </button>
+            <button
+              className={productConfigDetailTab === "benefits-pricing" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={productConfigDetailTab === "benefits-pricing"}
+              onClick={() => setProductConfigDetailTab("benefits-pricing")}
+            >
+              Benefits pricing
+            </button>
+            <button
+              className={productConfigDetailTab === "rates" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={productConfigDetailTab === "rates"}
+              onClick={() => setProductConfigDetailTab("rates")}
+            >
+              Rates
+            </button>
+            <button
+              className={productConfigDetailTab === "charges" ? "active" : ""}
+              type="button"
+              role="tab"
+              aria-selected={productConfigDetailTab === "charges"}
+              onClick={() => setProductConfigDetailTab("charges")}
+            >
+              Charges
+            </button>
+          </div>
+
+          {productConfigDetailTab === "overview" && (
+            <div className="product-detail-card product-config-overview-card">
+              <h3>Product overview</h3>
+              <dl className="product-config-overview-dl">
+                <div>
+                  <dt>Product code</dt>
+                  <dd>{selectedProduct.code}</dd>
+                </div>
+                <div>
+                  <dt>Product name</dt>
+                  <dd>{selectedProduct.name}</dd>
+                </div>
+                <div>
+                  <dt>Type</dt>
+                  <dd>{selectedProduct.type}</dd>
+                </div>
+                <div>
+                  <dt>Version</dt>
+                  <dd>{selectedProduct.version}</dd>
+                </div>
+                <div>
+                  <dt>Currency</dt>
+                  <dd>{selectedProduct.currency}</dd>
+                </div>
+                <div>
+                  <dt>Effective date</dt>
+                  <dd>{selectedProduct.effectiveDate}</dd>
+                </div>
+              </dl>
+            </div>
+          )}
+
+          {productConfigDetailTab === "benefits-pricing" && (
+            <div className="product-detail-workbench">
+              <aside className="product-section-sidebar product-benefit-sidebar" aria-label="Benefits configuration">
+                {productConfigurationBenefits.map((benefit, index) => (
+                  <button
+                    className={activeBenefit === benefit ? "active" : ""}
+                    key={benefit}
+                    type="button"
+                    onClick={() => setActiveBenefit(benefit)}
+                  >
+                    <span>{index + 1}</span>
+                    <div>
+                      <strong>{benefit}</strong>
+                      <small>Loadings, discounts, and net</small>
+                    </div>
+                  </button>
+                ))}
+              </aside>
+
+              <div className="product-detail-content">
+                <section className="product-detail-card benefit-pricing-card">
+                  <h3>Loadings and discounts</h3>
+
+                  <div className="benefit-pricing-matrix" role="region" aria-label="Benefit pricing matrix for life 1 and life 2">
+                    <div className="benefit-pricing-matrix-grid">
+                      <div className="benefit-pricing-matrix-corner benefit-pricing-matrix-axis-label" aria-hidden="true">
+                        <span className="benefit-pricing-matrix-axis-y">Pricing</span>
+                        <span className="benefit-pricing-matrix-axis-x">Life →</span>
+                      </div>
+                      <div className="benefit-pricing-matrix-col-head" role="columnheader">
+                        Life 1
+                      </div>
+                      <div className="benefit-pricing-matrix-col-head" role="columnheader">
+                        Life 2
+                      </div>
+
+                      {benefitPricingRows.map((row) => (
+                        <Fragment key={row.key}>
+                          <div className="benefit-pricing-matrix-row-head" role="rowheader">
+                            {row.label}
+                          </div>
+                          {["first", "second"].map((lifeKey) => {
+                            const cell = activeBenefitState[row.key]?.[lifeKey] || emptyBenefitPricingCell();
+
+                            return (
+                              <div className="benefit-pricing-matrix-cell" key={lifeKey} role="gridcell">
+                                <div className="benefit-pricing-matrix-cell-row">
+                                  <div className="benefit-pricing-matrix-inline-group">
+                                    <DropdownSelect
+                                      variant="compact"
+                                      className="benefit-pricing-matrix-inline-select"
+                                      aria-label="Pricing type"
+                                      value={cell.mode}
+                                      options={[
+                                        { value: "percent", label: "%" },
+                                        { value: "fixed", label: "Rate" },
+                                      ]}
+                                      onChange={(val) =>
+                                        updateBenefitPricingCell(activeBenefit, row.key, lifeKey, {
+                                          mode: val === "fixed" ? "fixed" : "percent",
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                  <div className="benefit-pricing-matrix-inline-group">
+                                    <input
+                                      className="benefit-pricing-matrix-inline-input"
+                                      type="text"
+                                      inputMode="decimal"
+                                      placeholder={cell.mode === "percent" ? "e.g. 2.5" : "e.g. 500"}
+                                      value={cell.value}
+                                      aria-label={cell.mode === "percent" ? "Value %" : `Value ${selectedProduct.currency}`}
+                                      onChange={(event) =>
+                                        updateBenefitPricingCell(activeBenefit, row.key, lifeKey, {
+                                          value: event.target.value,
+                                        })
+                                      }
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </Fragment>
+                      ))}
+
+                      <Fragment key="net-row">
+                        <div className="benefit-pricing-matrix-row-head benefit-pricing-matrix-row-head--net" role="rowheader">
+                          Net loading / (discount)
+                        </div>
+                        <div className="benefit-pricing-matrix-cell benefit-pricing-matrix-cell--net" role="gridcell">
+                          <span className="benefit-pricing-matrix-net-value">{netFirstLife.text}</span>
+                        </div>
+                        <div className="benefit-pricing-matrix-cell benefit-pricing-matrix-cell--net" role="gridcell">
+                          <span className="benefit-pricing-matrix-net-value">{netSecondLife.text}</span>
+                        </div>
+                      </Fragment>
+                    </div>
+                  </div>
+
+                  <p className="benefit-pricing-matrix-footnote">
+                    Net is computed from % inputs only (other loadings minus discounts including high sum cover). If a cell uses Rate for that life, the net for that life shows —.
+                  </p>
+                  {(netFirstLife.kind === "mixed" || netSecondLife.kind === "mixed") && (
+                    <small className="benefit-pricing-mixed-note">{netFirstLife.hint || netSecondLife.hint}</small>
+                  )}
+                </section>
+              </div>
+            </div>
+          )}
+
+          {productConfigDetailTab === "rates" && (
+            <div className="product-detail-charge-rates-wrap">
+              <div className="product-charge-rate-chip-bar" role="toolbar" aria-label="Age-band rate tables">
+                {CHARGE_TAB_CHIP_ITEMS_AGE_BAND.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={selectedChargeRateTableId === item.id ? "active" : ""}
+                    aria-pressed={selectedChargeRateTableId === item.id}
+                    onClick={() => setSelectedChargeRateTableId(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {selectedChargeRateTableId === "rga-rates" && (
+                <ProductAgeBandRateMatrixSection
+                  title="RGA Rates (2020 Treaty)"
+                  subtitle="Death"
+                  rows={rgaRowsForProduct}
+                  ariaRegionLabel="RGA death rates, editable by age"
+                  onUpdateCell={(age, field, patch) => updateRgaRateCell(age, field, patch)}
+                />
+              )}
+              {(() => {
+                const table = PRODUCT_AGE_BAND_RATE_TABLES.find((t) => t.id === selectedChargeRateTableId);
+                if (!table) {
+                  return null;
+                }
+
+                return (
+                  <ProductAgeBandRateMatrixSection
+                    key={table.id}
+                    title={table.title}
+                    subtitle={table.subtitle}
+                    rows={ageBandRowsByIdForProduct[table.id]}
+                    ariaRegionLabel={table.regionAriaLabel}
+                    onUpdateCell={(age, field, patch) => updateAgeBandRateCell(table.id, age, field, patch)}
+                  />
+                );
+              })()}
+            </div>
+          )}
+          {productConfigDetailTab === "charges" && (
+            <div className="product-detail-charge-rates-wrap">
+              <div className="product-charge-rate-chip-bar" role="toolbar" aria-label="Plan-year charges and discount rate">
+                {CHARGE_TAB_CHIP_ITEMS_PLAN.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className={selectedChargesTwoTableId === item.id ? "active" : ""}
+                    aria-pressed={selectedChargesTwoTableId === item.id}
+                    onClick={() => setSelectedChargesTwoTableId(item.id)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              {(() => {
+                const cfg = PRODUCT_PLAN_CHARGE_TABLES.find((t) => t.id === selectedChargesTwoTableId);
+                if (!cfg) {
+                  return null;
+                }
+
+                return (
+                  <ProductPlanYearChargeTable
+                    key={cfg.id}
+                    title={cfg.title}
+                    subtitle={cfg.subtitle}
+                    regionAriaLabel={cfg.regionAriaLabel}
+                    dataColumns={cfg.dataColumns}
+                    rows={planChargeRowsByIdForProduct[cfg.id]}
+                    onUpdateCell={(planYear, key, patch) => updatePlanChargeCell(cfg.id, planYear, key, patch)}
+                  />
+                );
+              })()}
+              {selectedChargesTwoTableId === "discount-rate" && (
+                <ProductDiscountScheduleTable
+                  rows={discountScheduleRowsForProduct}
+                  regionAriaLabel="Discount rate schedule by month, editable"
+                  onUpdateFactor={updateDiscountScheduleFactor}
+                />
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {!productCode && showCreateForm && (
+        <section className="panel product-create-panel">
+          <div className="section-heading">
+            <PageTitleWithBack
+              backAriaLabel="Product configuration list"
+              eyebrow="Configuration"
+              onBack={() => setShowCreateForm(false)}
+              subtitle={
+                <p>Sections are grouped by how underwriting, pricing, projection, validation, and servicing engines consume the configuration.</p>
+              }
+              title="Create New Product"
+              titleAs="h2"
+            />
+          </div>
+
+          <div className="product-create-workbench">
+            <aside className="product-section-sidebar" aria-label="Product configuration sections">
+              {productSections.map((section, index) => (
+                <button
+                  className={activeProductSection === index ? "active" : ""}
+                  key={section.title}
+                  type="button"
+                  onClick={() => setActiveProductSection(index)}
+                >
+                  <span>{index + 1}</span>
+                  <div>
+                    <strong>{section.title}</strong>
+                    <small className={productSectionCompletion[index] ? "completed" : ""}>
+                      {productSectionCompletion[index] ? "Completed" : "Pending"}
+                    </small>
+                  </div>
+                </button>
+              ))}
+            </aside>
+
+            <article className="proposal-section-card product-create-section">
+              <h5>{selectedProductSection.title}</h5>
+              <p>{selectedProductSection.description}</p>
+              <div className="product-field-group-list">
+                {selectedProductSection.groups.map((group) => (
+                  <section className="product-field-group" key={group.title}>
+                    <h6>{group.title}</h6>
+                    <div className={`form-grid proposal-section-grid ${activeProductSection === 2 ? "mapping-list-grid" : ""}`}>
+                      {group.fields.map(renderProductField)}
+                    </div>
+                  </section>
+                ))}
+              </div>
+
+              <div className="product-section-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={activeProductSection === 0}
+                  onClick={() => setActiveProductSection((current) => current - 1)}
+                >
+                  Previous Section
+                </button>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={activeProductSection === productSections.length - 1}
+                  onClick={() => setActiveProductSection((current) => current + 1)}
+                >
+                  Next Section
+                </button>
+              </div>
+            </article>
+          </div>
+
+          <div className="step-actions">
+            <button className="primary-button" type="button">
+              Save Product Draft
+            </button>
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
+
+function UnderwriterPortal() {
+  const navigate = useNavigate();
+  const [activeUnderwriterTab, setActiveUnderwriterTab] = useState("quotes");
+  const [underwriterSearch, setUnderwriterSearch] = useState("");
+  const [underwriterFilter, setUnderwriterFilter] = useState("All statuses");
+  const underwritingMetrics = [
+    { label: "Quotes in Review", value: "24", trend: "+8% this week", series: [14, 16, 18, 20, 19, 22, 24] },
+    { label: "Open Referrals", value: "13", trend: "5 high priority", series: [9, 12, 11, 14, 13, 15, 13] },
+    { label: "Policies Issued", value: "18", trend: "AED 2.4M cover", series: [8, 9, 11, 10, 14, 16, 18] },
+    { label: "Avg Decision Time", value: "1.6d", trend: "-8% vs last week", series: [24, 22, 21, 20, 18, 17, 16] },
+  ];
+  const underwriterTabs = [
+    { id: "quotes", label: "Quotes" },
+    { id: "referrals", label: "Referrals" },
+    { id: "policies", label: "Policies" },
+  ];
+  const referralItems = [
+    {
+      id: "UW-2103",
+      customer: "Aarav Mehta",
+      product: "SecureLife Protector",
+      premium: "AED 30,000",
+      status: "Evidence Pending",
+      updated: "Today",
+    },
+    {
+      id: "UW-2102",
+      customer: "Fatima Khan",
+      product: "Takaful Family Shield",
+      premium: "AED 18,000",
+      status: "Residency Referral",
+      updated: "Yesterday",
+    },
+    {
+      id: "UW-2101",
+      customer: "Lina Santos",
+      product: "FutureWealth Life",
+      premium: "AED 24,000",
+      status: "Ready for Decision",
+      updated: "2 days ago",
+    },
+  ];
+  const workspaceItems = [
+    ...initialQuotes.filter((item) => item.id.startsWith("Q-")).map((item) => ({ ...item, tab: "quotes" })),
+    ...referralItems.map((item) => ({ ...item, tab: "referrals" })),
+    ...initialQuotes.filter((item) => item.id.startsWith("P-")).map((item) => ({ ...item, tab: "policies" })),
+  ];
+  const statusOptions = [
+    "All statuses",
+    ...new Set(workspaceItems.filter((item) => item.tab === activeUnderwriterTab).map((item) => item.status)),
+  ];
+  const tableItems = workspaceItems.filter((item) => item.tab === activeUnderwriterTab).filter((item) => {
+    const searchText = `${item.id} ${item.customer} ${item.product} ${item.status}`.toLowerCase();
+    const matchesSearch = searchText.includes(underwriterSearch.toLowerCase());
+    const matchesStatus = underwriterFilter === "All statuses" || item.status === underwriterFilter;
+
+    return matchesSearch && matchesStatus;
+  });
+
+  return (
+    <main className="portal">
+      <div className="distributor-dashboard underwriter-dashboard">
+        <div className="distributor-main">
+          <section className="dashboard-intro underwriter-intro">
+            <div>
+              <p className="eyebrow">Underwriter portal</p>
+              <h1>Underwriting workspace</h1>
+              <p>Review submitted quotes, manage underwriting referrals, and track issued policies in one workspace.</p>
+            </div>
+            <div className="underwriter-intro-actions">
+              <button className="primary-button" type="button" onClick={() => navigate("/underwriter/product-studio")}>
+                Product Studio
+              </button>
+              <button className="primary-button" type="button" onClick={() => navigate("/underwriter/products")}>
+                Product Configuration
+              </button>
+            </div>
+          </section>
+
+          <section className="metric-row" aria-label="Underwriter metrics">
+            {underwritingMetrics.map((metric) => (
+              <article className="metric-card" key={metric.label}>
+                <div>
+                  <span>{metric.label}</span>
+                  <div className="metric-value-row">
+                    <strong>{metric.value}</strong>
+                    <small>{metric.trend}</small>
+                  </div>
+                </div>
+                <MetricBarChart data={metric.series} />
+              </article>
+            ))}
+          </section>
+
+          <section className="panel">
+            <div className="workspace-toolbar">
+              <div className="dashboard-tabs" role="tablist" aria-label="Underwriter workspace tabs">
+                {underwriterTabs.map((tab) => (
+                  <button
+                    className={activeUnderwriterTab === tab.id ? "active" : ""}
+                    key={tab.id}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeUnderwriterTab === tab.id}
+                    onClick={() => {
+                      setActiveUnderwriterTab(tab.id);
+                      setUnderwriterFilter("All statuses");
+                    }}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+              <div className="workspace-controls">
+                <label>
+                  <span>Search</span>
+                  <input
+                    type="search"
+                    placeholder="Search customer, ref, product"
+                    value={underwriterSearch}
+                    onChange={(event) => setUnderwriterSearch(event.target.value)}
+                  />
+                </label>
+                <label>
+                  <span>Filter</span>
+                  <DropdownSelect value={underwriterFilter} onChange={setUnderwriterFilter} options={statusOptions} />
+                </label>
+              </div>
+            </div>
+
+            <div className="table">
+              <div className="table-row table-head">
+                <span>Reference</span>
+                <span>Customer</span>
+                <span>Product</span>
+                <span>Premium</span>
+                <span>Status</span>
+                <span>Updated</span>
+                <span>Actions</span>
+              </div>
+              {tableItems.map((item) => (
+                <div className="table-row" key={item.id}>
+                  <span>{item.id}</span>
+                  <span>{item.customer}</span>
+                  <span>{item.product}</span>
+                  <span>{item.premium}</span>
+                  <span>
+                    <span className="status-dot" />
+                    {item.status}
+                  </span>
+                  <span>{item.updated}</span>
+                  <span>
+                    <button className="table-action-button" type="button">
+                      View Details
+                    </button>
+                  </span>
+                </div>
+              ))}
+              {tableItems.length === 0 && <div className="empty-state">No records in this tab.</div>}
+            </div>
+          </section>
+
+        </div>
+      </div>
     </main>
   );
 }
@@ -2516,29 +4395,61 @@ function AppFooter() {
   );
 }
 
+function RootRedirect() {
+  const target =
+    typeof localStorage !== "undefined" && localStorage.getItem("life-insurance-active-portal") === "underwriter"
+      ? "/underwriter"
+      : "/distributor";
+  return <Navigate to={target} replace />;
+}
+
 export default function App() {
-  const [activePortal, setActivePortal] = useState("distributor");
-  const [authenticatedPortals, setAuthenticatedPortals] = useState({
-    distributor: false,
-    underwriter: false,
+  const [authenticatedPortals, setAuthenticatedPortals] = useState(() => {
+    const storedAuthentication = localStorage.getItem("life-insurance-authenticated-portals");
+
+    if (storedAuthentication) {
+      return JSON.parse(storedAuthentication);
+    }
+
+    return {
+      distributor: false,
+      underwriter: false,
+    };
   });
-  const [distributorPage, setDistributorPage] = useState("dashboard");
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    const path = location.pathname;
+    if (path.startsWith("/distributor")) {
+      localStorage.setItem("life-insurance-active-portal", "distributor");
+    } else if (path.startsWith("/underwriter")) {
+      localStorage.setItem("life-insurance-active-portal", "underwriter");
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    localStorage.setItem("life-insurance-authenticated-portals", JSON.stringify(authenticatedPortals));
+  }, [authenticatedPortals]);
 
   function switchPortal(portal) {
-    setActivePortal(portal);
-    setDistributorPage("dashboard");
+    navigate(`/${portal}`);
   }
 
-  function loginToPortal() {
-    setAuthenticatedPortals((current) => ({ ...current, [activePortal]: true }));
+  function loginToPortal(portalKey) {
+    setAuthenticatedPortals((current) => ({ ...current, [portalKey]: true }));
   }
 
   function logoutFromPortal() {
-    setAuthenticatedPortals((current) => ({ ...current, [activePortal]: false }));
-    setDistributorPage("dashboard");
+    const portalKey = location.pathname.startsWith("/underwriter") ? "underwriter" : "distributor";
+    setAuthenticatedPortals((current) => ({ ...current, [portalKey]: false }));
+    navigate(`/${portalKey}`);
   }
 
-  const isAuthenticated = authenticatedPortals[activePortal];
+  const activePortalForNav = location.pathname.startsWith("/underwriter") ? "underwriter" : "distributor";
+  const isAuthenticated = authenticatedPortals[activePortalForNav];
+  const isMainDashboard =
+    location.pathname === "/distributor" || location.pathname === "/underwriter";
 
   return (
     <div className="app-shell">
@@ -2550,14 +4461,14 @@ export default function App() {
         {!isAuthenticated && (
           <div className="portal-switcher">
             <button
-              className={activePortal === "distributor" ? "active" : ""}
+              className={activePortalForNav === "distributor" ? "active" : ""}
               type="button"
               onClick={() => switchPortal("distributor")}
             >
               Distributor Portal
             </button>
             <button
-              className={activePortal === "underwriter" ? "active" : ""}
+              className={activePortalForNav === "underwriter" ? "active" : ""}
               type="button"
               onClick={() => switchPortal("underwriter")}
             >
@@ -2565,22 +4476,66 @@ export default function App() {
             </button>
           </div>
         )}
-        {isAuthenticated && (
+        {isAuthenticated && isMainDashboard && (
           <button className="secondary-button nav-action" type="button" onClick={logoutFromPortal}>
             Logout
           </button>
         )}
       </nav>
-      {!isAuthenticated && (
-        <LoginPage key={activePortal} portal={activePortal} onLogin={loginToPortal} />
-      )}
-      {isAuthenticated && activePortal === "distributor" && distributorPage === "dashboard" && (
-        <DistributorPortal onCreateQuote={() => setDistributorPage("newQuote")} />
-      )}
-      {isAuthenticated && activePortal === "distributor" && distributorPage === "newQuote" && (
-        <QuoteApplicationPage onBack={() => setDistributorPage("dashboard")} />
-      )}
-      {isAuthenticated && activePortal === "underwriter" && <UnderwriterPortal />}
+      <Routes>
+        <Route path="/" element={<RootRedirect />} />
+        <Route
+          path="/distributor"
+          element={
+            !authenticatedPortals.distributor ? (
+              <LoginPage portal="distributor" onLogin={() => loginToPortal("distributor")} />
+            ) : (
+              <DistributorPortal />
+            )
+          }
+        />
+        <Route
+          path="/distributor/quote"
+          element={
+            !authenticatedPortals.distributor ? <Navigate to="/distributor" replace /> : <QuoteApplicationPage />
+          }
+        />
+        <Route
+          path="/distributor/record/:recordId"
+          element={
+            !authenticatedPortals.distributor ? <Navigate to="/distributor" replace /> : <DistributorRecordPage />
+          }
+        />
+        <Route
+          path="/underwriter"
+          element={
+            !authenticatedPortals.underwriter ? (
+              <LoginPage portal="underwriter" onLogin={() => loginToPortal("underwriter")} />
+            ) : (
+              <UnderwriterPortal />
+            )
+          }
+        />
+        <Route
+          path="/underwriter/products/:productCode"
+          element={
+            !authenticatedPortals.underwriter ? <Navigate to="/underwriter" replace /> : <ProductConfigurationPage />
+          }
+        />
+        <Route
+          path="/underwriter/products"
+          element={
+            !authenticatedPortals.underwriter ? <Navigate to="/underwriter" replace /> : <ProductConfigurationPage />
+          }
+        />
+        <Route
+          path="/underwriter/product-studio/*"
+          element={
+            !authenticatedPortals.underwriter ? <Navigate to="/underwriter" replace /> : <ProductStudioLayout />
+          }
+        />
+        <Route path="*" element={<Navigate to="/distributor" replace />} />
+      </Routes>
       <AppFooter />
     </div>
   );

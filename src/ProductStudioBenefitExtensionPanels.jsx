@@ -6,6 +6,7 @@ import {
   ProductStudioFundsPanel,
   fundRowToEditForm,
 } from "./ProductStudioFundsPanel.jsx";
+import { ProductStudioSavingsPanel } from "./ProductStudioSavingsPanel.jsx";
 import {
   DEMO_FUNDS_LIST,
   effectiveAllocationRulesForFund,
@@ -50,6 +51,7 @@ const BENEFIT_COMPONENT_CARDS = [
   { id: "charge-rate-tables", label: "Charge Rate Tables", route: "charge-rate-tables", icon: "layers" },
   { id: "charges", label: "Charges", route: "charges", icon: "gear" },
   { id: "funds", label: "Funds & Investments", route: "funds", icon: "flow" },
+  { id: "savings", label: "Savings", route: "savings", icon: "target" },
   { id: "underwriting-rules", label: "Underwriting Rules", route: "underwriting-rules", icon: "shield" },
 ];
 
@@ -59,6 +61,9 @@ function benefitComponentCardIdForTab(tabId) {
   }
   if (tabId === "charges") {
     return "charges";
+  }
+  if (tabId === "savings") {
+    return "savings";
   }
   if (tabId === "fund-growth-table") {
     return "funds";
@@ -125,6 +130,14 @@ function BenefitComponentCardIcon({ name }) {
         <svg {...svgProps}>
           <path d="M12 3L2 8l10 5 10-5-10-5z" />
           <path d="M2 13l10 5 10-5M2 18l10 5 10-5" />
+        </svg>
+      );
+    case "target":
+      return (
+        <svg {...svgProps}>
+          <circle cx="12" cy="12" r="8" />
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
         </svg>
       );
     case "document":
@@ -1340,6 +1353,15 @@ function ChargeRateTablesPanel({ tableStructure }) {
   return <RateSegmentTablePanel config={config} />;
 }
 
+/** Savings features on the dedicated benefit savings page. */
+export function BenefitSavingsPanel({ savings, onSavingsChange }) {
+  return (
+    <div className="psc-field-section psc-benefit-detail-extension psc-benefit-savings-panel">
+      <ProductStudioSavingsPanel savings={savings} onSavingsChange={onSavingsChange} />
+    </div>
+  );
+}
+
 /** Underwriting rules on the dedicated benefit underwriting-rules page (same panel as product components). */
 export function BenefitUnderwritingRulesPanel({ underwritingRules, onUnderwritingRulesChange }) {
   return (
@@ -1711,6 +1733,7 @@ export function BenefitRateTablesPanel({ activeTab, onTabChange, tableStructure 
  *   chargeRateTablesPath?: string,
  *   chargesPath?: string,
  *   fundsPath?: string,
+ *   savingsPath?: string,
  *   underwritingRulesPath?: string,
  *   highlightComponentCardId?: string,
  * }} props
@@ -1722,6 +1745,7 @@ export function BenefitDetailExtensionPanel({
   chargeRateTablesPath = "",
   chargesPath = "",
   fundsPath = "",
+  savingsPath = "",
   underwritingRulesPath = "",
   highlightComponentCardId = "",
 }) {
@@ -1743,6 +1767,10 @@ export function BenefitDetailExtensionPanel({
     }
     if (card.route === "funds" && fundsPath) {
       navigate(fundsPath);
+      return;
+    }
+    if (card.route === "savings" && savingsPath) {
+      navigate(savingsPath);
       return;
     }
     if (card.route === "underwriting-rules" && underwritingRulesPath) {

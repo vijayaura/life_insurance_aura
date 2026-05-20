@@ -18,6 +18,7 @@ import { defaultMedicalRequirementMatrixConfiguration } from "./productStudioMed
 import { defaultDocumentTemplatesConfiguration } from "./productStudioDocumentTemplates.js";
 import { defaultCommissionDistributionConfiguration } from "./productStudioCommissionDistribution.js";
 import { defaultTableStructureDesign } from "./productStudioTableStructure.jsx";
+import { defaultSavingsConfiguration } from "./productStudioSavings.js";
 import { defaultRidersConfiguration } from "./productStudioRiders.js";
 
 /** Section headings for the Product components card hub (display order). */
@@ -429,6 +430,7 @@ export function defaultProductConfiguration() {
     tableStructureDesign: defaultTableStructureDesign(),
     charges: defaultChargesConfiguration(),
     funds: defaultFundsConfiguration(),
+    savings: defaultSavingsConfiguration(),
     policyServicing: defaultPolicyServicingConfiguration(),
     underwritingRules: defaultUnderwritingRulesConfiguration(),
     medicalRequirementMatrix: defaultMedicalRequirementMatrixConfiguration(),

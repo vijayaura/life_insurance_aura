@@ -25,6 +25,7 @@ import {
   BenefitFundDetailPanel,
   BenefitFundsPanel,
   BenefitRateTablesPanel,
+  BenefitSavingsPanel,
   BenefitUnderwritingRulesPanel,
   BENEFIT_EDIT_EXTENSION_TABS,
   BENEFIT_RATE_TABLE_TABS,
@@ -48,6 +49,7 @@ import { normalizeMedicalRequirementMatrixConfiguration } from "./productStudioM
 import { normalizeCommissionDistributionConfiguration } from "./productStudioCommissionDistribution.js";
 import { normalizeDocumentTemplatesConfiguration } from "./productStudioDocumentTemplates.js";
 import { normalizeTableStructureDesign } from "./productStudioTableStructure.jsx";
+import { normalizeSavingsConfiguration } from "./productStudioSavings.js";
 import { normalizeRidersConfig } from "./productStudioRiders.js";
 import { coreBenefitRowToForm, DEMO_CORE_BENEFIT_LIST } from "./productStudioCoreBenefits.js";
 import { ProductStudioRiderFormPage } from "./ProductStudioRiderFormPage.jsx";
@@ -180,6 +182,20 @@ function mergeFundsIntoDraft(draft, items) {
     productConfiguration: {
       ...pc,
       funds: normalizeFundsConfiguration({ items: Array.isArray(items) ? items : [] }),
+    },
+  };
+}
+
+function mergeSavingsIntoDraft(draft, savings) {
+  if (!draft) {
+    return draft;
+  }
+  const pc = draft.productConfiguration || defaultProductConfiguration();
+  return {
+    ...draft,
+    productConfiguration: {
+      ...pc,
+      savings: normalizeSavingsConfiguration(savings),
     },
   };
 }
@@ -1714,6 +1730,7 @@ function ProductStudioBenefitEditPage() {
           chargeRateTablesPath={`/underwriter/product-studio/${encodeURIComponent(productId)}/benefits/${encodeURIComponent(benefitId)}/charge-rate-tables`}
           chargesPath={`/underwriter/product-studio/${encodeURIComponent(productId)}/benefits/${encodeURIComponent(benefitId)}/charges`}
           fundsPath={`/underwriter/product-studio/${encodeURIComponent(productId)}/benefits/${encodeURIComponent(benefitId)}/funds`}
+          savingsPath={`/underwriter/product-studio/${encodeURIComponent(productId)}/benefits/${encodeURIComponent(benefitId)}/savings`}
           underwritingRulesPath={`/underwriter/product-studio/${encodeURIComponent(productId)}/benefits/${encodeURIComponent(benefitId)}/underwriting-rules`}
         />
       </section>
@@ -2286,6 +2303,91 @@ function ProductStudioBenefitFundsPage() {
   );
 }
 
+function ProductStudioBenefitSavingsPage() {
+  const navigate = useNavigate();
+  const { productId, benefitId } = useParams();
+  const [draft, setDraft] = useState(null);
+  const [notFound, setNotFound] = useState(false);
+  const [benefitNotFound, setBenefitNotFound] = useState(false);
+  const benefitEditPath = `/underwriter/product-studio/${encodeURIComponent(productId)}/benefits/${encodeURIComponent(benefitId)}/edit`;
+
+  useEffect(() => {
+    const list = loadProductCatalog();
+    const found = findProductById(list, productId);
+    if (!found) {
+      setNotFound(true);
+      setDraft(null);
+      setBenefitNotFound(false);
+      return;
+    }
+    let d = { ...found, productConfiguration: found.productConfiguration || defaultProductConfiguration() };
+    const items = d.productConfiguration?.coreBenefitsAndRiders?.items ?? [];
+    setBenefitNotFound(false);
+    if (!items.some((b) => b.id === benefitId)) {
+      const demo = DEMO_CORE_BENEFIT_LIST.find((b) => b.id === benefitId);
+      if (demo) {
+        d = mergeCoreBenefitsItemsIntoDraft(d, [...items, { ...demo }]);
+      } else {
+        setBenefitNotFound(true);
+      }
+    }
+    setDraft(d);
+    setNotFound(false);
+  }, [productId, benefitId]);
+
+  const patchSavings = useCallback((next) => {
+    setDraft((d) => mergeSavingsIntoDraft(d, next));
+  }, []);
+
+  const benefitRow = useMemo(() => {
+    const items = draft?.productConfiguration?.coreBenefitsAndRiders?.items ?? [];
+    return items.find((b) => b.id === benefitId);
+  }, [draft, benefitId]);
+
+  const savingsRaw = draft?.productConfiguration?.savings;
+
+  const pageTitle = useMemo(() => {
+    const name = benefitRow?.benefitName?.trim() || "…";
+    return `Savings — ${name}`;
+  }, [benefitRow?.benefitName]);
+
+  if (notFound) {
+    return (
+      <main className="portal psc-page psc-form-page">
+        <header className="psc-header">
+          <PageTitleWithBack backAriaLabel="Products" onBack={() => navigate("/underwriter/product-studio")} title="Product not found" />
+        </header>
+      </main>
+    );
+  }
+
+  if (benefitNotFound) {
+    return (
+      <main className="portal psc-page psc-form-page">
+        <header className="psc-header">
+          <PageTitleWithBack backAriaLabel="Product" onBack={() => navigate(`/underwriter/product-studio/${encodeURIComponent(productId)}`)} title="Benefit not found" />
+        </header>
+      </main>
+    );
+  }
+
+  if (!draft || !benefitRow) {
+    return null;
+  }
+
+  return (
+    <main className="portal psc-page psc-form-page">
+      <header className="psc-header">
+        <PageTitleWithBack backAriaLabel="Edit benefit" onBack={() => navigate(benefitEditPath)} title={pageTitle} />
+      </header>
+
+      <section className="psc-form-card">
+        <BenefitSavingsPanel savings={savingsRaw} onSavingsChange={patchSavings} />
+      </section>
+    </main>
+  );
+}
+
 function ProductStudioBenefitFundGrowthRatePage() {
   const navigate = useNavigate();
   const { productId, benefitId, fundId } = useParams();
@@ -2574,6 +2676,7 @@ export function ProductStudioLayout() {
       <Route path=":productId/benefits/:benefitId/charges" element={<ProductStudioBenefitChargesPage />} />
       <Route path=":productId/benefits/:benefitId/funds/:fundId/growth-rate" element={<ProductStudioBenefitFundGrowthRatePage />} />
       <Route path=":productId/benefits/:benefitId/funds" element={<ProductStudioBenefitFundsPage />} />
+      <Route path=":productId/benefits/:benefitId/savings" element={<ProductStudioBenefitSavingsPage />} />
       <Route path=":productId/benefits/:benefitId/underwriting-rules" element={<ProductStudioBenefitUnderwritingRulesPage />} />
       <Route path=":productId/riders/edit/:kind/:riderId" element={<ProductStudioRiderFormPage />} />
       <Route path=":productId/components/:componentId" element={<ProductStudioComponentPage />} />

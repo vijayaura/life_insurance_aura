@@ -73,7 +73,8 @@ export function DropdownSelect({
         top: `${r.bottom + 4}px`,
         width: `${r.width}px`,
         maxHeight: `${maxH}px`,
-        zIndex: 10050,
+        /* Above Product Studio modals (.psc-benefit-dialog-backdrop is 10080) */
+        zIndex: 10100,
       });
     };
     update();
@@ -133,9 +134,9 @@ export function DropdownSelect({
           {emptyOptionLabel}
         </button>
       )}
-      {normalized.map((opt) => (
+      {normalized.map((opt, idx) => (
         <button
-          key={opt.value}
+          key={opt.value === "" ? `opt-empty-${idx}-${opt.label}` : opt.value}
           type="button"
           role="option"
           aria-selected={opt.value === v}

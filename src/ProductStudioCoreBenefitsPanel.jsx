@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { DropdownSelect } from "./DropdownSelect.jsx";
 import {
   BENEFIT_TRIGGER_OPTIONS,
@@ -7,7 +8,9 @@ import {
   CALCULATION_METHOD_OPTIONS,
   DEMO_CORE_BENEFIT_LIST,
   MANDATORY_OPTIONAL_OPTIONS,
+  MORTALITY_RATE_BASIS_OPTIONS,
   YES_NO_OPTIONS,
+  coreBenefitRowToForm,
   descriptionForBenefitName,
   emptyCoreBenefitForm,
 } from "./productStudioCoreBenefits.js";
@@ -31,18 +34,14 @@ function PscTextField({ label, value, onChange, placeholder, type = "text" }) {
   );
 }
 
-function BenefitDialogForm({ form, derivedDescription, patchForm, onSave, onCancel, saveLabel }) {
+/**
+ * Shared benefit fields (dialog body or full-page editor). No save/cancel row.
+ */
+export function CoreBenefitEditorFormBody({ form, patchForm }) {
   return (
-    <div className="psc-benefit-dialog-body">
-      {form.benefitName.trim() && derivedDescription ? (
-        <p className="psc-core-benefits-ref-desc">
-          <span className="psc-core-benefits-ref-desc-label">Reference</span>
-          {derivedDescription}
-        </p>
-      ) : null}
-
+    <>
       <div className="psc-field-section">
-        <h3 className="psc-field-section-title psc-core-benefits-subtitle">Benefit identity</h3>
+        <h2 className="psc-field-section-title">Benefit identity</h2>
         <div className="psc-field-grid">
           <PscTextField label="Benefit name" value={form.benefitName} onChange={(v) => patchForm("benefitName", v)} placeholder="e.g. Death Benefit" />
           <PscSelectField label="Benefit type" value={form.benefitType} options={BENEFIT_TYPE_OPTIONS} onChange={(v) => patchForm("benefitType", v)} />
@@ -52,11 +51,12 @@ function BenefitDialogForm({ form, derivedDescription, patchForm, onSave, onCanc
             options={MANDATORY_OPTIONAL_OPTIONS}
             onChange={(v) => patchForm("mandatoryOptional", v)}
           />
+          <PscSelectField label="Rate basis" value={form.rateBasis} options={MORTALITY_RATE_BASIS_OPTIONS} onChange={(v) => patchForm("rateBasis", v)} />
         </div>
       </div>
 
       <div className="psc-field-section">
-        <h3 className="psc-field-section-title psc-core-benefits-subtitle">Calculation & limits</h3>
+        <h2 className="psc-field-section-title">Calculation & limits</h2>
         <div className="psc-field-grid">
           <PscSelectField
             label="Benefit calculation method"
@@ -76,7 +76,7 @@ function BenefitDialogForm({ form, derivedDescription, patchForm, onSave, onCanc
       </div>
 
       <div className="psc-field-section">
-        <h3 className="psc-field-section-title psc-core-benefits-subtitle">Waiting, exclusions & behaviour</h3>
+        <h2 className="psc-field-section-title">Waiting, exclusions & behaviour</h2>
         <div className="psc-field-grid">
           <PscTextField label="Waiting period" value={form.waitingPeriod} onChange={(v) => patchForm("waitingPeriod", v)} placeholder="e.g. 90 days" />
           <PscTextField
@@ -100,9 +100,17 @@ function BenefitDialogForm({ form, derivedDescription, patchForm, onSave, onCanc
           <PscSelectField label="Can be accelerated" value={form.canBeAccelerated} options={YES_NO_OPTIONS} onChange={(v) => patchForm("canBeAccelerated", v)} />
         </div>
       </div>
+    </>
+  );
+}
+
+function BenefitDialogForm({ form, patchForm, onSave, onCancel, saveLabel }) {
+  return (
+    <div className="psc-benefit-dialog-body">
+      <CoreBenefitEditorFormBody form={form} patchForm={patchForm} />
 
       <div className="psc-field-section psc-benefit-dialog-actions-section">
-        <h3 className="psc-field-section-title psc-core-benefits-subtitle">Save benefit</h3>
+        <h2 className="psc-field-section-title">Save benefit</h2>
         <div className="psc-benefit-dialog-footer">
           <button type="button" className="primary-button" onClick={onSave}>
             {saveLabel}
@@ -117,11 +125,13 @@ function BenefitDialogForm({ form, derivedDescription, patchForm, onSave, onCanc
 }
 
 /**
- * Core benefits & riders — list + Add benefit / Edit in dialog.
+ * Core benefits & riders — list + Add benefit / View details (full-page) or Edit in dialog.
  * @param {{ items: object[] }} props
  * @param {(nextItems: object[]) => void} props.onItemsChange
+ * @param {string} [props.benefitEditBasePath] — when set, Edit opens full-page editor at `{base}/benefits/:id/edit`
  */
-export function CoreBenefitsRidersPanel({ items, onItemsChange }) {
+export function CoreBenefitsRidersPanel({ items, onItemsChange, benefitEditBasePath = "" }) {
+  const navigate = useNavigate();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(() => emptyCoreBenefitForm());
@@ -133,8 +143,6 @@ export function CoreBenefitsRidersPanel({ items, onItemsChange }) {
   const patchForm = useCallback((key, v) => {
     setForm((f) => ({ ...f, [key]: v }));
   }, []);
-
-  const derivedDescription = useMemo(() => descriptionForBenefitName(form.benefitName), [form.benefitName]);
 
   const resetDialogState = useCallback(() => {
     setEditingId(null);
@@ -173,23 +181,22 @@ export function CoreBenefitsRidersPanel({ items, onItemsChange }) {
         return;
       }
       setEditingId(persisted ? id : null);
-      setForm({
-        benefitName: row.benefitName || "",
-        benefitType: row.benefitType || BENEFIT_TYPE_OPTIONS[0],
-        mandatoryOptional: row.mandatoryOptional || MANDATORY_OPTIONAL_OPTIONS[0],
-        calculationMethod: row.calculationMethod || CALCULATION_METHOD_OPTIONS[0],
-        benefitTrigger: row.benefitTrigger || BENEFIT_TRIGGER_OPTIONS[0],
-        waitingPeriod: row.waitingPeriod || "",
-        exclusionPeriod: row.exclusionPeriod || "",
-        maximumPayable: row.maximumPayable || "",
-        benefitExpiry: row.benefitExpiry || "",
-        multipleClaimsAllowed: row.multipleClaimsAllowed || "No",
-        reducesBaseSumAssured: row.reducesBaseSumAssured || "No",
-        canBeAccelerated: row.canBeAccelerated || "No",
-      });
+      setForm(coreBenefitRowToForm(row));
       setDialogOpen(true);
     },
     [items],
+  );
+
+  const goEditBenefit = useCallback(
+    (id) => {
+      const base = typeof benefitEditBasePath === "string" ? benefitEditBasePath.trim() : "";
+      if (base) {
+        navigate(`${base.replace(/\/$/, "")}/benefits/${encodeURIComponent(id)}/edit`);
+        return;
+      }
+      openEditDialog(id);
+    },
+    [benefitEditBasePath, navigate, openEditDialog],
   );
 
   const saveBenefit = useCallback(() => {
@@ -203,6 +210,7 @@ export function CoreBenefitsRidersPanel({ items, onItemsChange }) {
       benefitName: name,
       benefitType: form.benefitType,
       mandatoryOptional: form.mandatoryOptional,
+      rateBasis: form.rateBasis,
       calculationMethod: form.calculationMethod,
       benefitTrigger: form.benefitTrigger,
       waitingPeriod: form.waitingPeriod?.trim() || "",
@@ -267,7 +275,6 @@ export function CoreBenefitsRidersPanel({ items, onItemsChange }) {
           </header>
           <BenefitDialogForm
             form={form}
-            derivedDescription={derivedDescription}
             patchForm={patchForm}
             onSave={saveBenefit}
             onCancel={closeDialog}
@@ -316,8 +323,16 @@ export function CoreBenefitsRidersPanel({ items, onItemsChange }) {
                       ))}
                     </div>
                     <div className="psc-benefit-card-actions">
-                      <button type="button" className="psc-card-action psc-studio-row-edit" onClick={() => openEditDialog(b.id)}>
-                        Edit
+                      <button
+                        type="button"
+                        className={
+                          benefitEditBasePath?.trim()
+                            ? "primary-button psc-benefit-card-view"
+                            : "psc-card-action psc-studio-row-edit"
+                        }
+                        onClick={() => goEditBenefit(b.id)}
+                      >
+                        View details
                       </button>
                       {!listIsMock ? (
                         <button type="button" className="secondary-button psc-benefit-card-remove" onClick={() => removeItem(b.id)}>

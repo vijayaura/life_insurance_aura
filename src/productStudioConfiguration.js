@@ -13,23 +13,88 @@
 import { defaultChargesConfiguration } from "./productStudioCharges.js";
 import { defaultFundsConfiguration } from "./productStudioFunds.js";
 import { defaultPolicyServicingConfiguration } from "./productStudioPolicyServicing.js";
-import { defaultPricingConfiguration } from "./productStudioPricing.js";
+import { defaultUnderwritingRulesConfiguration } from "./productStudioUnderwriting.js";
+import { defaultMedicalRequirementMatrixConfiguration } from "./productStudioMedicalMatrix.js";
+import { defaultDocumentTemplatesConfiguration } from "./productStudioDocumentTemplates.js";
+import { defaultCommissionDistributionConfiguration } from "./productStudioCommissionDistribution.js";
+import { defaultTableStructureDesign } from "./productStudioTableStructure.jsx";
 import { defaultRidersConfiguration } from "./productStudioRiders.js";
 
-/** Sidebar tabs for Product configuration. Extend for new areas. */
-export const VIEW_CONFIG_TABS = [
-  { id: "duration-eligibility", label: "Product Duration & Eligibility", ready: true },
-  { id: "core-benefits", label: "Core benefits", ready: true },
-  { id: "riders", label: "Riders", ready: true },
-  { id: "pricing", label: "Pricing", ready: true },
-  { id: "charges", label: "Charges and fees", ready: true },
-  { id: "funds", label: "Funds", ready: true },
+/** Section headings for the Product components card hub (display order). */
+export const PRODUCT_COMPONENT_SECTION_ORDER = [
+  "Policy controls",
+  "Forms & Data",
+  "Pricing & UW",
+  "Reports & Integrations",
+];
+
+/**
+ * Configuration tabs nested inside the Product details collapsible (order fixed).
+ * `category` + `icon` drive the card hub layout; tabs without `category` fall back to "Other" in the hub.
+ */
+export const VIEW_CONFIG_TABS_INSIDE_DETAILS = [
+  { id: "policy-term-coverage", label: "Policy term & coverage", ready: true, category: "Policy controls", icon: "layers" },
   {
     id: "policy-servicing",
-    label: "Surrender, Loan, Withdrawal & Policy Servicing Rules",
+    label: "Policy Servicing Rules",
     ready: true,
+    category: "Policy controls",
+    icon: "chart",
   },
+  {
+    id: "medical-matrix",
+    label: "Medical Matrix",
+    ready: true,
+    category: "Policy controls",
+    icon: "medical",
+  },
+  { id: "proposal-form-design", label: "Proposal Form Design", ready: true, category: "Forms & Data", icon: "document" },
+  { id: "masters-management", label: "Masters Management", ready: true, category: "Forms & Data", icon: "database" },
+  { id: "workflow-management", label: "Workflow Management", ready: true, category: "Forms & Data", icon: "flow" },
+  { id: "authority-matrix", label: "Authority Matrix", ready: true, category: "Forms & Data", icon: "key" },
+  {
+    id: "table-structure-design",
+    label: "Rating Structure Design",
+    ready: true,
+    category: "Pricing & UW",
+    icon: "database",
+  },
+  { id: "underwriting-eligibility", label: "Underwriting eligibility", ready: true, category: "Pricing & UW", icon: "shield" },
+  {
+    id: "underwriting-rules",
+    label: "UW Rules Engine",
+    ready: true,
+    category: "Pricing & UW",
+    icon: "sliders",
+  },
+  {
+    id: "commission-distribution",
+    label: "Commissions & Campaigns",
+    ready: true,
+    category: "Pricing & UW",
+    icon: "target",
+  },
+  {
+    id: "document-templates",
+    label: "Document Templates",
+    ready: true,
+    category: "Reports & Integrations",
+    icon: "document",
+  },
+  { id: "notifications", label: "Notifications", ready: true, category: "Reports & Integrations", icon: "bell" },
 ];
+
+/** Configuration tabs below Product details (benefits, riders, funds, charges). */
+export const VIEW_CONFIG_TABS_BELOW_DETAILS = [
+  { id: "benefit-premium", label: "Benefit amounts & premium", ready: true },
+  { id: "core-benefits", label: "Core benefits", ready: true },
+  { id: "riders", label: "Riders", ready: true },
+  { id: "funds", label: "Funds & Investments", ready: true },
+  { id: "charges", label: "Charges and fees", ready: true },
+];
+
+/** Full tab list: inside Product details first, then below (import/export and tooling). */
+export const VIEW_CONFIG_TABS = [...VIEW_CONFIG_TABS_INSIDE_DETAILS, ...VIEW_CONFIG_TABS_BELOW_DETAILS];
 
 const CCY = (p) => p?.productCurrency || "AED";
 
@@ -69,25 +134,42 @@ const APPLICABLE_BENEFIT_DESCRIPTIONS = Object.fromEntries(
   APPLICABLE_BENEFITS_META.map(([name, desc]) => [name, desc]),
 );
 
-/** Grouped sections for the Product Duration & Eligibility form (same pattern as product basics). */
-export const DURATION_ELIGIBILITY_FIELD_SECTIONS = [
-  {
-    title: "Entry & maturity ages",
-    ids: ["minEntryAge", "maxEntryAge", "minMaturityAge", "maxMaturityAge"],
-  },
-  {
-    title: "Policy term & coverage",
-    ids: ["policyTermOptions", "premiumPaymentTerm", "coverageTerm", "renewalAllowed", "conversionAllowed"],
-  },
-  {
-    title: "Benefit amounts & premium",
-    ids: ["minSumAssured", "maxSumAssured", "minPremium", "applicableBenefits"],
-  },
-  {
-    title: "Underwriting eligibility",
-    ids: ["residencyEligibility", "nationalityRestrictions", "occupationRestrictions", "smokerStatus", "genderLogic"],
-  },
-];
+/** Rule ids grouped by product-configuration sidebar tab (duration & eligibility split). */
+export const DURATION_ELIGIBILITY_TAB_RULE_IDS = {
+  "duration-eligibility": ["minEntryAge", "maxEntryAge", "minMaturityAge", "maxMaturityAge"],
+  "policy-term-coverage": ["policyTermOptions", "premiumPaymentTerm", "coverageTerm", "renewalAllowed", "conversionAllowed"],
+  "benefit-premium": ["minSumAssured", "maxSumAssured", "minPremium", "applicableBenefits"],
+  "underwriting-eligibility": [
+    "residencyEligibility",
+    "nationalityRestrictions",
+    "occupationRestrictions",
+    "smokerStatus",
+    "genderLogic",
+  ],
+};
+
+/** Rule ids for the "Product Duration & Eligibility" block inside Product details (not a sidebar tab). */
+export const PRODUCT_DETAILS_DURATION_ELIGIBILITY_RULE_IDS = DURATION_ELIGIBILITY_TAB_RULE_IDS["duration-eligibility"];
+
+export const PRODUCT_DETAILS_DURATION_ELIGIBILITY_SECTION_TITLE = "Product Duration & Eligibility";
+
+/** Tab / template ids that map to `durationEligibility.overrides` (includes `duration-eligibility` for CSV upload). */
+export const DURATION_ELIGIBILITY_CONFIG_TAB_IDS = Object.keys(DURATION_ELIGIBILITY_TAB_RULE_IDS);
+
+const DURATION_SECTION_TITLE_BY_FIRST_ID = {
+  minEntryAge: "Entry & maturity ages",
+  policyTermOptions: "Policy term & coverage",
+  minSumAssured: "Benefit amounts & premium",
+  residencyEligibility: "Underwriting eligibility",
+};
+
+/** Grouped sections per tab (one visual section per tab, same titles as before the split). */
+export const DURATION_ELIGIBILITY_TABS_FIELD_SECTIONS = Object.fromEntries(
+  Object.entries(DURATION_ELIGIBILITY_TAB_RULE_IDS).map(([tabId, ids]) => {
+    const title = DURATION_SECTION_TITLE_BY_FIRST_ID[ids[0]] || "Configuration";
+    return [tabId, [{ title, ids }]];
+  }),
+);
 
 /** @typedef {"text" | "number" | "select" | "multiselect" | "textarea"} DurationEligibilityFieldKind */
 
@@ -186,26 +268,9 @@ const DURATION_ELIGIBILITY_FIELD_DEFS = {
 };
 
 /** Rule row ids — used for overrides: productConfiguration.durationEligibility.overrides[id] */
-export const DURATION_ELIGIBILITY_RULE_IDS = [
-  "minEntryAge",
-  "maxEntryAge",
-  "minMaturityAge",
-  "maxMaturityAge",
-  "policyTermOptions",
-  "premiumPaymentTerm",
-  "coverageTerm",
-  "renewalAllowed",
-  "conversionAllowed",
-  "minSumAssured",
-  "maxSumAssured",
-  "minPremium",
-  "applicableBenefits",
-  "residencyEligibility",
-  "nationalityRestrictions",
-  "occupationRestrictions",
-  "smokerStatus",
-  "genderLogic",
-];
+export const DURATION_ELIGIBILITY_RULE_IDS = DURATION_ELIGIBILITY_CONFIG_TAB_IDS.flatMap(
+  (tabId) => DURATION_ELIGIBILITY_TAB_RULE_IDS[tabId],
+);
 
 function labelForId(id) {
   const map = {
@@ -361,9 +426,13 @@ export function defaultProductConfiguration() {
       items: [],
     },
     riders: defaultRidersConfiguration(),
-    pricing: defaultPricingConfiguration(),
+    tableStructureDesign: defaultTableStructureDesign(),
     charges: defaultChargesConfiguration(),
     funds: defaultFundsConfiguration(),
     policyServicing: defaultPolicyServicingConfiguration(),
+    underwritingRules: defaultUnderwritingRulesConfiguration(),
+    medicalRequirementMatrix: defaultMedicalRequirementMatrixConfiguration(),
+    commissionDistribution: defaultCommissionDistributionConfiguration(),
+    documentTemplates: defaultDocumentTemplatesConfiguration(),
   };
 }

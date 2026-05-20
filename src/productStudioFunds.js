@@ -57,6 +57,97 @@ export function normalizeAllocationRules(raw) {
   return out;
 }
 
+function allocationRulesHasValues(rules) {
+  const n = normalizeAllocationRules(rules);
+  return Object.values(n).some((v) => v);
+}
+
+/** Illustrative per-fund allocation rules for demo / preview funds. */
+const DEMO_ALLOCATION_BY_FUND_ID = {
+  "demo-fund-balanced-ae": {
+    minNumberOfFunds: "2",
+    maxNumberOfFunds: "8",
+    minAllocationPerFundPct: "10",
+    allocationTotalMustEqualPct: "100",
+    defaultFundName: "Salama Balanced Growth",
+    autoRebalancing: "Yes",
+    switchingAllowed: "Yes",
+    freeSwitchesPerYear: "4",
+    switchFeeAfterFree: "1% of fund value",
+    topUpAllowed: "Yes",
+    partialWithdrawalAllowed: "Yes",
+    minWithdrawalAmount: "5000",
+    minRemainingFundValue: "25000",
+    premiumHolidayAllowed: "No",
+    loyaltyUnits: "2% units after policy year 5",
+  },
+  "demo-fund-equity-usd": {
+    minNumberOfFunds: "1",
+    maxNumberOfFunds: "6",
+    minAllocationPerFundPct: "5",
+    allocationTotalMustEqualPct: "100",
+    defaultFundName: "Global Equity Index",
+    autoRebalancing: "Yes",
+    switchingAllowed: "Yes",
+    freeSwitchesPerYear: "6",
+    switchFeeAfterFree: "USD 50 per switch",
+    topUpAllowed: "Yes",
+    partialWithdrawalAllowed: "Yes",
+    minWithdrawalAmount: "1000",
+    minRemainingFundValue: "10000",
+    premiumHolidayAllowed: "Yes",
+    loyaltyUnits: "—",
+  },
+  "demo-fund-sukuk": {
+    minNumberOfFunds: "2",
+    maxNumberOfFunds: "5",
+    minAllocationPerFundPct: "15",
+    allocationTotalMustEqualPct: "100",
+    defaultFundName: "Sukuk Income Portfolio",
+    autoRebalancing: "No",
+    switchingAllowed: "Yes",
+    freeSwitchesPerYear: "2",
+    switchFeeAfterFree: "0.5% of switch amount",
+    topUpAllowed: "Yes",
+    partialWithdrawalAllowed: "No",
+    minWithdrawalAmount: "—",
+    minRemainingFundValue: "50000",
+    premiumHolidayAllowed: "No",
+    loyaltyUnits: "Guaranteed loyalty bonus at maturity",
+  },
+  "demo-fund-money-mkt": {
+    minNumberOfFunds: "1",
+    maxNumberOfFunds: "4",
+    minAllocationPerFundPct: "0",
+    allocationTotalMustEqualPct: "100",
+    defaultFundName: "Liquidity Money Market",
+    autoRebalancing: "Yes",
+    switchingAllowed: "Yes",
+    freeSwitchesPerYear: "12",
+    switchFeeAfterFree: "No fee",
+    topUpAllowed: "Yes",
+    partialWithdrawalAllowed: "Yes",
+    minWithdrawalAmount: "500",
+    minRemainingFundValue: "5000",
+    premiumHolidayAllowed: "Yes",
+    loyaltyUnits: "—",
+  },
+};
+
+/** @param {string} [fundId] */
+export function demoAllocationRulesForFundId(fundId) {
+  const raw = DEMO_ALLOCATION_BY_FUND_ID[fundId] ?? DEMO_ALLOCATION_BY_FUND_ID["demo-fund-balanced-ae"];
+  return normalizeAllocationRules(raw);
+}
+
+/** Use saved rules when present; otherwise demo mock for preview funds. */
+export function effectiveAllocationRulesForFund(fund) {
+  if (fund?.allocationRules && allocationRulesHasValues(fund.allocationRules)) {
+    return normalizeAllocationRules(fund.allocationRules);
+  }
+  return demoAllocationRulesForFundId(fund?.id);
+}
+
 /** Sample funds shown when the product has none saved (same pattern as core benefits demo list). */
 export const DEMO_FUNDS_LIST = [
   {
@@ -73,6 +164,7 @@ export const DEMO_FUNDS_LIST = [
     fundStatus: "Active",
     shariaCompliant: "Yes",
     guaranteeApplicable: "No",
+    allocationRules: DEMO_ALLOCATION_BY_FUND_ID["demo-fund-balanced-ae"],
   },
   {
     id: "demo-fund-equity-usd",
@@ -88,6 +180,7 @@ export const DEMO_FUNDS_LIST = [
     fundStatus: "Active",
     shariaCompliant: "No",
     guaranteeApplicable: "No",
+    allocationRules: DEMO_ALLOCATION_BY_FUND_ID["demo-fund-equity-usd"],
   },
   {
     id: "demo-fund-sukuk",
@@ -103,6 +196,7 @@ export const DEMO_FUNDS_LIST = [
     fundStatus: "Active",
     shariaCompliant: "Yes",
     guaranteeApplicable: "Yes",
+    allocationRules: DEMO_ALLOCATION_BY_FUND_ID["demo-fund-sukuk"],
   },
   {
     id: "demo-fund-money-mkt",
@@ -118,6 +212,7 @@ export const DEMO_FUNDS_LIST = [
     fundStatus: "Active",
     shariaCompliant: "No",
     guaranteeApplicable: "No",
+    allocationRules: DEMO_ALLOCATION_BY_FUND_ID["demo-fund-money-mkt"],
   },
 ];
 

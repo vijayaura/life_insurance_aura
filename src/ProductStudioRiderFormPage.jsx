@@ -160,7 +160,6 @@ export function ProductStudioRiderFormPage() {
         <header className="psc-header">
           <PageTitleWithBack
             backAriaLabel="Product configuration"
-            eyebrow="Underwriter portal"
             onBack={() => navigate(`/underwriter/product-studio/${productId}`)}
             title="Rider not found"
           />
@@ -178,7 +177,6 @@ export function ProductStudioRiderFormPage() {
       <header className="psc-header">
         <PageTitleWithBack
           backAriaLabel="Product configuration"
-          eyebrow="Underwriter portal"
           onBack={cancel}
           title={title}
           subtitle={

@@ -2,7 +2,15 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Routes, Route, Navigate, useNavigate, useParams, useLocation } from "react-router-dom";
 import { DropdownSelect } from "./DropdownSelect.jsx";
 import { PageTitleWithBack } from "./PageTitleWithBack.jsx";
+import { AppFooter } from "./AppFooter.jsx";
 import { ProductStudioLayout } from "./ProductStudioPage.jsx";
+import { DistributorSidebarLayout } from "./DistributorSidebarLayout.jsx";
+import { UnderwriterSidebarLayout, UnderwriterSectionPlaceholder } from "./UnderwriterSidebarLayout.jsx";
+import { SuitabilityRiskAssessmentStep } from "./SuitabilityRiskAssessmentStep.jsx";
+import {
+  defaultSuitabilityAssessment,
+  prefillSuitabilityFromLives,
+} from "./suitabilityRiskAssessment.js";
 
 const countryMaster = [
   "United Arab Emirates",
@@ -777,6 +785,7 @@ const blankRider = {
   rider_sum_assured: "",
   rider_premium: "",
   effective_date: "",
+  selected: false,
 };
 
 const uaeMockFirstLife = {
@@ -821,6 +830,7 @@ const uaeMockRider = {
   rider_sum_assured: "500000",
   rider_premium: "185",
   effective_date: "2026-06-01",
+  selected: true,
 };
 
 const mockSupportingDocuments = [
@@ -848,7 +858,13 @@ function createDefaultBenefitRider(benefitType) {
     protected_contribution_percent: config.protectedContributionPercent || "0%",
     rider_premium: benefitType === "Family Takaful Benefit (with TI)" ? "185" : "",
     effective_date: "2026-06-01",
+    selected: benefitType === "Family Takaful Benefit (with TI)",
   };
+}
+
+function getSelectedRiders(riders) {
+  const selected = riders.filter((rider) => rider.selected);
+  return selected.length > 0 ? selected : riders.slice(0, 1);
 }
 
 function calculateAge(dob) {
@@ -886,9 +902,10 @@ function getAnnualizedContribution(policy) {
 }
 
 function buildIllustrationRows(policy, riders, growthRate) {
+  const activeRiders = getSelectedRiders(riders);
   const annualContribution = getAnnualizedContribution(policy);
   const planTerm = Number(policy.plan_term || 20);
-  const takafulBenefit = Number(riders[0]?.benefit_value || riders[0]?.rider_sum_assured || 1000000);
+  const takafulBenefit = Number(activeRiders[0]?.benefit_value || activeRiders[0]?.rider_sum_assured || 1000000);
 
   return Array.from({ length: planTerm }, (_, index) => {
     const year = index + 1;
@@ -1352,80 +1369,132 @@ function PolicyDetails({ policy, onChange }) {
 }
 
 function RiderConfiguration({ riders, onChange }) {
+  const selectedRiders = riders.filter((rider) => rider.selected);
+
   function updateRider(benefitType, field, value) {
     onChange(
       riders.map((rider) => (rider.benefit_type === benefitType ? { ...rider, [field]: value } : rider))
     );
   }
 
-  return (
-    <section className="form-card">
-      <div className="section-heading">
-        <h3>Step 3 - Rider / Benefit Configuration</h3>
-        <span className="pill subtle">All benefits shown</span>
-      </div>
-      <div className="benefit-list">
-      {riders.map((rider) => {
-        const selectedBenefit = benefitConfigurations[rider.benefit_type];
+  function toggleRiderSelection(benefitType) {
+    onChange(
+      riders.map((rider) =>
+        rider.benefit_type === benefitType ? { ...rider, selected: !rider.selected } : rider
+      )
+    );
+  }
 
-        return (
-          <div className="rider-card" key={rider.benefit_type}>
-            <div className="section-heading">
-              <div>
-                <strong>{selectedBenefit.riderName}</strong>
-                <small>{rider.benefit_type}</small>
-              </div>
-            </div>
-            <div className="form-grid">
-              {selectedBenefit?.valueLabel && (
-                <TextField
-                  label={selectedBenefit.valueLabel}
-                  type="number"
-                  value={rider.benefit_value}
-                  onChange={(value) => updateRider(rider.benefit_type, "benefit_value", value)}
-                />
-              )}
-              {selectedBenefit?.hasApplicability && (
-                <SelectField
-                  label="Waiver of Contribution"
-                  value={rider.applicability}
-                  options={["Applicable", "Not Applicable"]}
-                  onChange={(value) => updateRider(rider.benefit_type, "applicability", value)}
-                />
-              )}
-              {selectedBenefit?.hasFibTerm && (
-                <TextField
-                  label="FIB Term"
-                  type="number"
-                  value={rider.fib_term}
-                  onChange={(value) => updateRider(rider.benefit_type, "fib_term", value)}
-                />
-              )}
-              {selectedBenefit?.hasProtectedContribution && (
-                <>
-                  <TextField
-                    label="Protected Contribution Term"
-                    type="number"
-                    value={rider.protected_contribution_term}
-                    onChange={(value) => updateRider(rider.benefit_type, "protected_contribution_term", value)}
-                  />
-                  <TextField
-                    label="Protected Contribution Percent"
-                    value={rider.protected_contribution_percent}
-                    onChange={(value) => updateRider(rider.benefit_type, "protected_contribution_percent", value)}
-                  />
-                </>
-              )}
+  function renderRiderFields(rider) {
+    const selectedBenefit = benefitConfigurations[rider.benefit_type];
+
+    return (
+      <div className="rider-card" key={rider.benefit_type}>
+        <div className="section-heading">
+          <div>
+            <strong>{selectedBenefit.riderName}</strong>
+            <small>{rider.benefit_type}</small>
+          </div>
+        </div>
+        <div className="form-grid">
+          {selectedBenefit?.valueLabel && (
+            <TextField
+              label={selectedBenefit.valueLabel}
+              type="number"
+              value={rider.benefit_value}
+              onChange={(value) => updateRider(rider.benefit_type, "benefit_value", value)}
+            />
+          )}
+          {selectedBenefit?.hasApplicability && (
+            <SelectField
+              label="Waiver of Contribution"
+              value={rider.applicability}
+              options={["Applicable", "Not Applicable"]}
+              onChange={(value) => updateRider(rider.benefit_type, "applicability", value)}
+            />
+          )}
+          {selectedBenefit?.hasFibTerm && (
+            <TextField
+              label="FIB Term"
+              type="number"
+              value={rider.fib_term}
+              onChange={(value) => updateRider(rider.benefit_type, "fib_term", value)}
+            />
+          )}
+          {selectedBenefit?.hasProtectedContribution && (
+            <>
               <TextField
-                label="Rider SI"
+                label="Protected Contribution Term"
                 type="number"
-                value={rider.rider_premium}
-                onChange={(value) => updateRider(rider.benefit_type, "rider_premium", value)}
+                value={rider.protected_contribution_term}
+                onChange={(value) => updateRider(rider.benefit_type, "protected_contribution_term", value)}
               />
+              <TextField
+                label="Protected Contribution Percent"
+                value={rider.protected_contribution_percent}
+                onChange={(value) => updateRider(rider.benefit_type, "protected_contribution_percent", value)}
+              />
+            </>
+          )}
+          <TextField
+            label="Rider SI"
+            type="number"
+            value={rider.rider_premium}
+            onChange={(value) => updateRider(rider.benefit_type, "rider_premium", value)}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <section className="form-card proposal-step rider-step">
+      <div className="section-heading">
+        <div>
+          <h3>Step 3 - Rider / Benefit Selections</h3>
+          <p>Select the riders or benefits to include on this quote, then complete the details for each selection.</p>
+        </div>
+        <span className="pill subtle">{selectedRiders.length} selected</span>
+      </div>
+
+      <div className="proposal-layout">
+        <aside className="proposal-list" aria-label="Available riders and benefits">
+          {riders.map((rider) => {
+            const config = benefitConfigurations[rider.benefit_type];
+            return (
+              <button
+                className={rider.selected ? "active" : ""}
+                key={rider.benefit_type}
+                type="button"
+                aria-pressed={rider.selected}
+                onClick={() => toggleRiderSelection(rider.benefit_type)}
+              >
+                <div>
+                  <strong>{config.riderName}</strong>
+                  <span>{rider.benefit_type}</span>
+                </div>
+                <em className={rider.selected ? "completed" : ""}>
+                  {rider.selected ? "Selected" : "Not selected"}
+                </em>
+              </button>
+            );
+          })}
+        </aside>
+
+        <div className="proposal-form">
+          <div className="proposal-form-heading">
+            <div>
+              <h4>Selected benefit details</h4>
+              <p>Configure sum assured, applicability, and premium for each selected rider.</p>
             </div>
           </div>
-        );
-      })}
+
+          {selectedRiders.length === 0 ? (
+            <p className="suitability-intro">Select at least one rider or benefit from the list to configure its details.</p>
+          ) : (
+            <div className="benefit-list">{selectedRiders.map(renderRiderFields)}</div>
+          )}
+        </div>
       </div>
     </section>
   );
@@ -2398,10 +2467,10 @@ function distributorRecordDetailType(item) {
 
 function LoginPage({ portal, onLogin }) {
   const isDistributor = portal === "distributor";
-  const portalTitle = isDistributor ? "Distributor Portal" : "Underwriter Portal";
+  const portalTitle = isDistributor ? "Distributor Portal" : "Market Admin Portal";
   const helperText = isDistributor
     ? "Access quote creation, illustrations, policy pipeline, and distributor performance metrics."
-    : "Access underwriting referrals, risk review, evidence tracking, and decision capture.";
+    : "Access Product Studio, product configuration, underwriting operations, and market-wide administration tools.";
   const [credentials, setCredentials] = useState({
     email: isDistributor ? "distributor@life.test" : "underwriter@life.test",
     password: "prototype",
@@ -2415,7 +2484,7 @@ function LoginPage({ portal, onLogin }) {
     <main className="login-page">
       <section className={`login-card ${isDistributor ? "" : "underwriter-login"}`}>
         <div>
-          <p className="eyebrow">{isDistributor ? "Distributor access" : "Underwriter access"}</p>
+          <p className="eyebrow">{isDistributor ? "Distributor access" : "Market Admin access"}</p>
           <h1>
             {portalTitle}
             <span>Login</span>
@@ -2437,7 +2506,7 @@ function LoginPage({ portal, onLogin }) {
             onChange={(value) => updateCredential("password", value)}
           />
           <button className="primary-button" type="button" onClick={onLogin}>
-            Login to {isDistributor ? "Distributor" : "Underwriter"} Portal
+            Login to {isDistributor ? "Distributor Portal" : "Market Admin Portal"}
           </button>
         </div>
       </section>
@@ -2465,8 +2534,22 @@ function QuoteApplicationPage() {
     receiptEmail: "omar.almansoori@example.ae",
     authorizationCode: "AUTH-582914",
   });
-  const [paymentConfirmed, setPaymentConfirmed] = useState(false);
   const [activeStep, setActiveStep] = useState(1);
+  const [suitabilityAssessment, setSuitabilityAssessment] = useState(() =>
+    prefillSuitabilityFromLives(
+      defaultSuitabilityAssessment(),
+      uaeMockFirstLife,
+      uaeMockSecondLife,
+      "Yes"
+    )
+  );
+
+  useEffect(() => {
+    setSuitabilityAssessment((prev) =>
+      prefillSuitabilityFromLives(prev, firstLife, secondLife, secondLifeSelection)
+    );
+  }, [secondLifeSelection]);
+
   const [warningMessages, setWarningMessages] = useState([]);
   const validationMessages = validateQuote(firstLife, secondLife, policy);
   const missingMandatoryDocuments = supportingDocuments.filter(
@@ -2474,12 +2557,12 @@ function QuoteApplicationPage() {
   );
   const steps = [
     { number: "1", title: "Life Assured", description: "Customer details" },
-    { number: "2", title: "Policy Details", description: "Product and premium" },
-    { number: "3", title: "Riders", description: "Benefits and loadings" },
-    { number: "4", title: "Illustrations", description: "Values and graph" },
-    { number: "5", title: "Proposals", description: "Forms and downloads" },
-    { number: "6", title: "Documents", description: "Mandatory and optional" },
-    { number: "7", title: "Payment", description: "Collect contribution" },
+    { number: "2", title: "Suitability & Risk", description: "Assessment form" },
+    { number: "3", title: "Proposals", description: "Forms and downloads" },
+    { number: "4", title: "Policy Details", description: "Product and premium" },
+    { number: "5", title: "Riders", description: "Benefits and loadings" },
+    { number: "6", title: "Illustrations", description: "Values and graph" },
+    { number: "7", title: "Documents", description: "Mandatory and optional" },
     { number: "8", title: "Issued", description: "Policy summary" },
   ];
 
@@ -2497,15 +2580,10 @@ function QuoteApplicationPage() {
       return;
     }
 
-    if (stepNumber > 6 && missingMandatoryDocuments.length > 0) {
+    if (stepNumber > 7 && missingMandatoryDocuments.length > 0) {
       setWarningMessages(
         missingMandatoryDocuments.map((document) => `${document.name} is mandatory and must be uploaded.`)
       );
-      return;
-    }
-
-    if (stepNumber > 7 && !paymentConfirmed) {
-      setWarningMessages(["Please confirm payment before issuing the policy."]);
       return;
     }
 
@@ -2515,17 +2593,18 @@ function QuoteApplicationPage() {
   return (
     <main className="portal quote-page">
       <section className="quote-builder">
-        <div className="section-heading sticky-heading">
-          <PageTitleWithBack
-            backAriaLabel="Quote and policy workspace"
-            eyebrow="New quote"
-            onBack={() => navigate("/distributor")}
-            title="Life Insurance Application"
-            titleAs="h2"
-          />
-        </div>
+        <div className="quote-application-top">
+          <header className="quote-application-heading">
+            <PageTitleWithBack
+              backAriaLabel="Quote and policy workspace"
+              eyebrow="New quote"
+              onBack={() => navigate("/distributor")}
+              title="Life Insurance Application"
+              titleAs="h2"
+            />
+          </header>
 
-        <nav className="application-stepper" aria-label="Application steps">
+          <nav className="application-stepper" aria-label="Application steps">
           {steps.map((step) => (
             <button
               className={`stepper-item ${activeStep === Number(step.number) ? "active" : ""}`}
@@ -2540,7 +2619,8 @@ function QuoteApplicationPage() {
               </div>
             </button>
           ))}
-        </nav>
+          </nav>
+        </div>
 
         {activeStep === 1 && (
           <>
@@ -2556,10 +2636,16 @@ function QuoteApplicationPage() {
             )}
           </>
         )}
-        {activeStep === 2 && <PolicyDetails policy={policy} onChange={setPolicy} />}
-        {activeStep === 3 && <RiderConfiguration riders={riders} onChange={setRiders} />}
-        {activeStep === 4 && <IllustrationStep policy={policy} riders={riders} />}
-        {activeStep === 5 && (
+        {activeStep === 2 && (
+          <SuitabilityRiskAssessmentStep
+            assessment={suitabilityAssessment}
+            onChange={setSuitabilityAssessment}
+            firstLife={firstLife}
+            secondLife={secondLife}
+            secondLifeSelection={secondLifeSelection}
+          />
+        )}
+        {activeStep === 3 && (
           <ProposalStep
             firstLife={firstLife}
             secondLife={secondLife}
@@ -2567,17 +2653,11 @@ function QuoteApplicationPage() {
             policy={policy}
           />
         )}
-        {activeStep === 6 && (
-          <SupportingDocumentsStep documents={supportingDocuments} onChange={setSupportingDocuments} />
-        )}
+        {activeStep === 4 && <PolicyDetails policy={policy} onChange={setPolicy} />}
+        {activeStep === 5 && <RiderConfiguration riders={riders} onChange={setRiders} />}
+        {activeStep === 6 && <IllustrationStep policy={policy} riders={riders} />}
         {activeStep === 7 && (
-          <PaymentStep
-            policy={policy}
-            paymentDetails={paymentDetails}
-            onPaymentChange={setPaymentDetails}
-            paymentConfirmed={paymentConfirmed}
-            onConfirmPayment={() => setPaymentConfirmed(true)}
-          />
+          <SupportingDocumentsStep documents={supportingDocuments} onChange={setSupportingDocuments} />
         )}
         {activeStep === 8 && (
           <PolicyIssuedStep
@@ -2676,15 +2756,16 @@ function DashboardDetailsPage({ item, type, onBack }) {
   const uploadedDocuments = mockSupportingDocuments.filter((document) => document.status === "Uploaded");
   const detailSteps = [
     { number: "1", title: "Life Assured", description: "Customer details" },
-    { number: "2", title: "Policy Details", description: "Product and premium" },
-    { number: "3", title: "Riders", description: "Benefits and loadings" },
-    { number: "4", title: "Illustrations", description: "Values and graph" },
-    { number: "5", title: "Proposals", description: "Forms and downloads" },
-    { number: "6", title: "Documents", description: "Mandatory and optional" },
-    { number: "7", title: "Payment", description: "Collect contribution" },
+    { number: "2", title: "Suitability & Risk", description: "Assessment form" },
+    { number: "3", title: "Proposals", description: "Forms and downloads" },
+    { number: "4", title: "Policy Details", description: "Product and premium" },
+    { number: "5", title: "Riders", description: "Benefits and loadings" },
+    { number: "6", title: "Illustrations", description: "Values and graph" },
+    { number: "7", title: "Documents", description: "Mandatory and optional" },
     { number: "8", title: "Issued", description: "Policy summary" },
   ];
-  const activeDetailStep = type === "policy" ? 8 : type === "referral" ? 6 : item.status === "Illustration Ready" ? 4 : 5;
+  const activeDetailStep =
+    type === "policy" ? 8 : type === "referral" ? 7 : item.status === "Illustration Ready" ? 6 : 2;
   const pageTitle = type === "policy" ? "Policy Details" : type === "referral" ? "Referral Details" : "Quote Details";
   const recordLabel = type === "policy" ? "Policy" : type === "referral" ? "Referral" : "Quote";
 
@@ -2865,7 +2946,6 @@ function DistributorPortal() {
         <div className="distributor-main">
           <section className="dashboard-intro">
             <div>
-              <p className="eyebrow">Distributor portal</p>
               <h1>Quote and policy workspace</h1>
               <p>Track pipeline performance, create illustrations, and prepare cases for underwriting.</p>
             </div>
@@ -3803,7 +3883,7 @@ function ProductConfigurationPage() {
         <section className="panel product-list-panel">
           <div className="section-heading">
             <PageTitleWithBack
-              backAriaLabel="Underwriting workspace"
+              backAriaLabel="Market admin dashboard"
               eyebrow="Configuration"
               onBack={() => navigate("/underwriter")}
               subtitle={<p>Select an existing product version or create a new product configuration.</p>}
@@ -4219,7 +4299,6 @@ function ProductConfigurationPage() {
 }
 
 function UnderwriterPortal() {
-  const navigate = useNavigate();
   const [activeUnderwriterTab, setActiveUnderwriterTab] = useState("quotes");
   const [underwriterSearch, setUnderwriterSearch] = useState("");
   const [underwriterFilter, setUnderwriterFilter] = useState("All statuses");
@@ -4283,21 +4362,15 @@ function UnderwriterPortal() {
         <div className="distributor-main">
           <section className="dashboard-intro underwriter-intro">
             <div>
-              <p className="eyebrow">Underwriter portal</p>
-              <h1>Underwriting workspace</h1>
-              <p>Review submitted quotes, manage underwriting referrals, and track issued policies in one workspace.</p>
-            </div>
-            <div className="underwriter-intro-actions">
-              <button className="primary-button" type="button" onClick={() => navigate("/underwriter/product-studio")}>
-                Product Studio
-              </button>
-              <button className="primary-button" type="button" onClick={() => navigate("/underwriter/products")}>
-                Product Configuration
-              </button>
+              <h1>Market admin dashboard</h1>
+              <p>
+                Review submitted quotes, manage underwriting referrals, and track issued policies. Configure products in
+                Product Studio from the sidebar.
+              </p>
             </div>
           </section>
 
-          <section className="metric-row" aria-label="Underwriter metrics">
+          <section className="metric-row" aria-label="Market admin metrics">
             {underwritingMetrics.map((metric) => (
               <article className="metric-card" key={metric.label}>
                 <div>
@@ -4314,7 +4387,7 @@ function UnderwriterPortal() {
 
           <section className="panel">
             <div className="workspace-toolbar">
-              <div className="dashboard-tabs" role="tablist" aria-label="Underwriter workspace tabs">
+              <div className="dashboard-tabs" role="tablist" aria-label="Market admin workspace tabs">
                 {underwriterTabs.map((tab) => (
                   <button
                     className={activeUnderwriterTab === tab.id ? "active" : ""}
@@ -4386,15 +4459,6 @@ function UnderwriterPortal() {
   );
 }
 
-function AppFooter() {
-  return (
-    <footer className="app-footer">
-      <span>Powered by</span>
-      <img src="/aura-logo.png" alt="Aura" />
-    </footer>
-  );
-}
-
 function RootRedirect() {
   const target =
     typeof localStorage !== "undefined" && localStorage.getItem("life-insurance-active-portal") === "underwriter"
@@ -4448,17 +4512,18 @@ export default function App() {
 
   const activePortalForNav = location.pathname.startsWith("/underwriter") ? "underwriter" : "distributor";
   const isAuthenticated = authenticatedPortals[activePortalForNav];
-  const isMainDashboard =
-    location.pathname === "/distributor" || location.pathname === "/underwriter";
+  const showGlobalFooter =
+    !(location.pathname.startsWith("/underwriter") && authenticatedPortals.underwriter) &&
+    !(location.pathname.startsWith("/distributor") && authenticatedPortals.distributor);
 
   return (
     <div className="app-shell">
-      <nav className="top-nav">
-        <div>
+      <nav className="top-nav" aria-label="Application">
+        <div className="top-nav-brand">
           <img className="brand-logo" src="/salama-logo-transparent.png" alt="Salama" />
-          <strong>Life Insurance</strong>
+          <span className="top-nav-portal-label top-nav-portal-label--brand">Life 360 Platform</span>
         </div>
-        {!isAuthenticated && (
+        {!isAuthenticated ? (
           <div className="portal-switcher">
             <button
               className={activePortalForNav === "distributor" ? "active" : ""}
@@ -4472,14 +4537,13 @@ export default function App() {
               type="button"
               onClick={() => switchPortal("underwriter")}
             >
-              Underwriter Portal
+              Market Admin Portal
             </button>
           </div>
-        )}
-        {isAuthenticated && isMainDashboard && (
-          <button className="secondary-button nav-action" type="button" onClick={logoutFromPortal}>
-            Logout
-          </button>
+        ) : (
+          <span className="top-nav-portal-label">
+            {activePortalForNav === "underwriter" ? "Market Admin Portal" : "Distributor Portal"}
+          </span>
         )}
       </nav>
       <Routes>
@@ -4490,53 +4554,45 @@ export default function App() {
             !authenticatedPortals.distributor ? (
               <LoginPage portal="distributor" onLogin={() => loginToPortal("distributor")} />
             ) : (
-              <DistributorPortal />
+              <DistributorSidebarLayout onLogout={logoutFromPortal} />
             )
           }
-        />
-        <Route
-          path="/distributor/quote"
-          element={
-            !authenticatedPortals.distributor ? <Navigate to="/distributor" replace /> : <QuoteApplicationPage />
-          }
-        />
-        <Route
-          path="/distributor/record/:recordId"
-          element={
-            !authenticatedPortals.distributor ? <Navigate to="/distributor" replace /> : <DistributorRecordPage />
-          }
-        />
+        >
+          <Route index element={<DistributorPortal />} />
+          <Route path="quote" element={<QuoteApplicationPage />} />
+          <Route path="record/:recordId" element={<DistributorRecordPage />} />
+        </Route>
         <Route
           path="/underwriter"
           element={
             !authenticatedPortals.underwriter ? (
               <LoginPage portal="underwriter" onLogin={() => loginToPortal("underwriter")} />
             ) : (
-              <UnderwriterPortal />
+              <UnderwriterSidebarLayout onLogout={logoutFromPortal} />
             )
           }
-        />
-        <Route
-          path="/underwriter/products/:productCode"
-          element={
-            !authenticatedPortals.underwriter ? <Navigate to="/underwriter" replace /> : <ProductConfigurationPage />
-          }
-        />
-        <Route
-          path="/underwriter/products"
-          element={
-            !authenticatedPortals.underwriter ? <Navigate to="/underwriter" replace /> : <ProductConfigurationPage />
-          }
-        />
-        <Route
-          path="/underwriter/product-studio/*"
-          element={
-            !authenticatedPortals.underwriter ? <Navigate to="/underwriter" replace /> : <ProductStudioLayout />
-          }
-        />
+        >
+          <Route index element={<UnderwriterPortal />} />
+          <Route path="products/:productCode" element={<ProductConfigurationPage />} />
+          <Route path="products" element={<ProductConfigurationPage />} />
+          <Route path="product-studio/*" element={<ProductStudioLayout />} />
+          <Route
+            path="underwriter-management"
+            element={<UnderwriterSectionPlaceholder title="Underwriter Management" />}
+          />
+          <Route
+            path="distributor-management"
+            element={<UnderwriterSectionPlaceholder title="Distributor Management" />}
+          />
+          <Route
+            path="analytics-reporting"
+            element={<UnderwriterSectionPlaceholder title="Analytics & Reporting" />}
+          />
+          <Route path="audit-logs" element={<UnderwriterSectionPlaceholder title="Audit Logs" />} />
+        </Route>
         <Route path="*" element={<Navigate to="/distributor" replace />} />
       </Routes>
-      <AppFooter />
+      {showGlobalFooter ? <AppFooter /> : null}
     </div>
   );
 }

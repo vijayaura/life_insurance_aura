@@ -7,11 +7,10 @@ import {
   YES_NO_EMPTY_CHOICES,
 } from "./productStudioRiders.js";
 
-function RuleField({ label, hint, children }) {
+function RuleField({ label, children }) {
   return (
     <label className="psc-field">
       <span className="psc-field-label">{label}</span>
-      {hint ? <span className="psc-field-hint">{hint}</span> : null}
       {children}
     </label>
   );
@@ -84,13 +83,13 @@ export function ProductStudioRiderFormFields({ form, setForm, patchRules, curren
       <div className="psc-field-section">
         <SectionTitle className={sectionTitleClass}>Age rules</SectionTitle>
         <div className="psc-field-grid">
-          <RuleField label="Minimum entry age" hint="e.g. 18">
+          <RuleField label="Minimum entry age">
             <input className="psc-input" type="text" inputMode="numeric" value={r.minEntryAge} onChange={(e) => patchRules("minEntryAge", e.target.value)} />
           </RuleField>
-          <RuleField label="Maximum entry age" hint="e.g. 60">
+          <RuleField label="Maximum entry age">
             <input className="psc-input" type="text" inputMode="numeric" value={r.maxEntryAge} onChange={(e) => patchRules("maxEntryAge", e.target.value)} />
           </RuleField>
-          <RuleField label="Maximum expiry age" hint="e.g. 65">
+          <RuleField label="Maximum expiry age">
             <input className="psc-input" type="text" inputMode="numeric" value={r.maxExpiryAge} onChange={(e) => patchRules("maxExpiryAge", e.target.value)} />
           </RuleField>
         </div>
@@ -109,10 +108,10 @@ export function ProductStudioRiderFormFields({ form, setForm, patchRules, curren
               placeholder="Select"
             />
           </div>
-          <RuleField label="Minimum rider SA" hint={`e.g. ${currency} 25,000`}>
+          <RuleField label="Minimum rider SA">
             <input className="psc-input" type="text" value={r.minRiderSa} onChange={(e) => patchRules("minRiderSa", e.target.value)} />
           </RuleField>
-          <RuleField label="Maximum rider SA" hint={`e.g. ${currency} 1,000,000`}>
+          <RuleField label="Maximum rider SA">
             <input className="psc-input" type="text" value={r.maxRiderSa} onChange={(e) => patchRules("maxRiderSa", e.target.value)} />
           </RuleField>
           <div className="psc-field">
@@ -131,10 +130,10 @@ export function ProductStudioRiderFormFields({ form, setForm, patchRules, curren
       <div className="psc-field-section">
         <SectionTitle className={sectionTitleClass}>Waiting & survival</SectionTitle>
         <div className="psc-field-grid">
-          <RuleField label="Waiting period" hint="Days (e.g. 90)">
+          <RuleField label="Waiting period">
             <input className="psc-input" type="text" inputMode="numeric" value={r.waitingPeriodDays} onChange={(e) => patchRules("waitingPeriodDays", e.target.value)} />
           </RuleField>
-          <RuleField label="Survival period" hint="e.g. 14 or 30 (CI)">
+          <RuleField label="Survival period">
             <input className="psc-input" type="text" value={r.survivalPeriodDays} onChange={(e) => patchRules("survivalPeriodDays", e.target.value)} />
           </RuleField>
         </div>
@@ -145,7 +144,6 @@ export function ProductStudioRiderFormFields({ form, setForm, patchRules, curren
         <div className="psc-field-grid">
           <label className="psc-field psc-field-wide">
             <span className="psc-field-label">Allowed occupations</span>
-            <span className="psc-field-hint">Describe classes or refer to UW manual.</span>
             <textarea
               className="psc-input psc-textarea psc-textarea--compact"
               rows={2}
@@ -165,7 +163,7 @@ export function ProductStudioRiderFormFields({ form, setForm, patchRules, curren
             />
           </div>
           {r.requiresMedicalUw === "above_limit" ? (
-            <RuleField label="Limit (describe)" hint="e.g. above rider SA 500k">
+            <RuleField label="Limit (describe)">
               <input className="psc-input" type="text" value={r.medicalUwLimit} onChange={(e) => patchRules("medicalUwLimit", e.target.value)} />
             </RuleField>
           ) : null}

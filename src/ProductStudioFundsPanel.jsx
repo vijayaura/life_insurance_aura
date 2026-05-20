@@ -13,6 +13,7 @@ import {
   YES_NO_ALLOC_OPTIONS,
   emptyAllocationRulesForm,
   emptyFundForm,
+  effectiveAllocationRulesForFund,
   normalizeAllocationRules,
   normalizeFundsConfiguration,
 } from "./productStudioFunds.js";
@@ -27,30 +28,40 @@ function PscSelectField({ label, value, options, onChange, placeholder }) {
   );
 }
 
-function PscTextField({ label, value, onChange, placeholder, type = "text", hint }) {
+function PscTextField({ label, value, onChange, placeholder, type = "text" }) {
   return (
     <label className="psc-field">
       <span className="psc-field-label">{label}</span>
-      {hint ? <span className="psc-field-hint">{hint}</span> : null}
       <input className="psc-input" type={type} value={value ?? ""} placeholder={placeholder || ""} onChange={(e) => onChange(e.target.value)} />
     </label>
   );
 }
 
-function FundDialogForm({ form, patchForm, onSave, onCancel, saveLabel }) {
+export function fundRowToEditForm(row) {
+  return {
+    fundName: row.fundName || "",
+    fundCode: row.fundCode || "",
+    fundType: row.fundType || "",
+    currency: row.currency || "",
+    riskRating: row.riskRating || "",
+    fundManager: row.fundManager || "",
+    navFrequency: row.navFrequency || "",
+    minAllocationPct: row.minAllocationPct || "",
+    maxAllocationPct: row.maxAllocationPct || "",
+    fundStatus: row.fundStatus || "Active",
+    shariaCompliant: row.shariaCompliant || "",
+    guaranteeApplicable: row.guaranteeApplicable || "",
+  };
+}
+
+export function FundDialogForm({ form, patchForm, onSave, onCancel, saveLabel, embedded = false }) {
   return (
-    <div className="psc-benefit-dialog-body">
+    <div className={`psc-benefit-dialog-body${embedded ? " psc-benefit-dialog-body--embedded" : ""}`}>
       <div className="psc-field-section">
         <h3 className="psc-field-section-title psc-core-benefits-subtitle">Fund identity</h3>
         <div className="psc-field-grid">
-          <PscTextField
-            label="Fund name"
-            hint="e.g. Balanced Fund, Equity Fund, Sukuk Fund"
-            value={form.fundName}
-            onChange={(v) => patchForm("fundName", v)}
-            placeholder="Display name"
-          />
-          <PscTextField label="Fund code" hint="Unique code" value={form.fundCode} onChange={(v) => patchForm("fundCode", v)} placeholder="e.g. EQ-AE-01" />
+          <PscTextField label="Fund name" value={form.fundName} onChange={(v) => patchForm("fundName", v)} placeholder="Display name" />
+          <PscTextField label="Fund code" value={form.fundCode} onChange={(v) => patchForm("fundCode", v)} placeholder="e.g. EQ-AE-01" />
         </div>
       </div>
 
@@ -68,8 +79,8 @@ function FundDialogForm({ form, patchForm, onSave, onCancel, saveLabel }) {
         <h3 className="psc-field-section-title psc-core-benefits-subtitle">NAV & allocation limits</h3>
         <div className="psc-field-grid">
           <PscSelectField label="NAV frequency" value={form.navFrequency} options={NAV_FREQUENCY_OPTIONS} onChange={(v) => patchForm("navFrequency", v)} />
-          <PscTextField label="Minimum allocation %" hint="e.g. 10" value={form.minAllocationPct} onChange={(v) => patchForm("minAllocationPct", v)} placeholder="%" />
-          <PscTextField label="Maximum allocation %" hint="e.g. 100" value={form.maxAllocationPct} onChange={(v) => patchForm("maxAllocationPct", v)} placeholder="%" />
+          <PscTextField label="Minimum allocation %" value={form.minAllocationPct} onChange={(v) => patchForm("minAllocationPct", v)} placeholder="%" />
+          <PscTextField label="Maximum allocation %" value={form.maxAllocationPct} onChange={(v) => patchForm("maxAllocationPct", v)} placeholder="%" />
         </div>
       </div>
 
@@ -88,18 +99,20 @@ function FundDialogForm({ form, patchForm, onSave, onCancel, saveLabel }) {
           <button type="button" className="primary-button" onClick={onSave}>
             {saveLabel}
           </button>
-          <button type="button" className="secondary-button" onClick={onCancel}>
-            Cancel
-          </button>
+          {!embedded && onCancel ? (
+            <button type="button" className="secondary-button" onClick={onCancel}>
+              Cancel
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
   );
 }
 
-function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisabled, saveHint }) {
+export function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisabled, saveHint, embedded = false }) {
   return (
-    <div className="psc-benefit-dialog-body">
+    <div className={`psc-benefit-dialog-body${embedded ? " psc-benefit-dialog-body--embedded" : ""}`}>
       {saveHint ? (
         <p className="psc-core-benefits-ref-desc">
           <span className="psc-core-benefits-ref-desc-label">Note</span>
@@ -110,17 +123,17 @@ function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisab
       <div className="psc-field-section">
         <h3 className="psc-field-section-title psc-core-benefits-subtitle">Fund count & allocation totals</h3>
         <div className="psc-field-grid">
-          <PscTextField label="Minimum number of funds" hint="e.g. 1" value={form.minNumberOfFunds} onChange={(v) => patchForm("minNumberOfFunds", v)} placeholder="" />
-          <PscTextField label="Maximum number of funds" hint="e.g. 5" value={form.maxNumberOfFunds} onChange={(v) => patchForm("maxNumberOfFunds", v)} placeholder="" />
-          <PscTextField label="Minimum allocation per fund" hint="e.g. 10%" value={form.minAllocationPerFundPct} onChange={(v) => patchForm("minAllocationPerFundPct", v)} placeholder="%" />
-          <PscTextField label="Allocation total must equal" hint="e.g. 100%" value={form.allocationTotalMustEqualPct} onChange={(v) => patchForm("allocationTotalMustEqualPct", v)} placeholder="%" />
+          <PscTextField label="Minimum number of funds" value={form.minNumberOfFunds} onChange={(v) => patchForm("minNumberOfFunds", v)} placeholder="" />
+          <PscTextField label="Maximum number of funds" value={form.maxNumberOfFunds} onChange={(v) => patchForm("maxNumberOfFunds", v)} placeholder="" />
+          <PscTextField label="Minimum allocation per fund" value={form.minAllocationPerFundPct} onChange={(v) => patchForm("minAllocationPerFundPct", v)} placeholder="%" />
+          <PscTextField label="Allocation total must equal" value={form.allocationTotalMustEqualPct} onChange={(v) => patchForm("allocationTotalMustEqualPct", v)} placeholder="%" />
         </div>
       </div>
 
       <div className="psc-field-section">
         <h3 className="psc-field-section-title psc-core-benefits-subtitle">Default & rebalancing</h3>
         <div className="psc-field-grid">
-          <PscTextField label="Default fund" hint="e.g. Conservative Fund" value={form.defaultFundName} onChange={(v) => patchForm("defaultFundName", v)} placeholder="Name or code" />
+          <PscTextField label="Default fund" value={form.defaultFundName} onChange={(v) => patchForm("defaultFundName", v)} placeholder="Name or code" />
           <PscSelectField label="Auto rebalancing" value={form.autoRebalancing} options={YES_NO_ALLOC_OPTIONS} onChange={(v) => patchForm("autoRebalancing", v)} />
         </div>
       </div>
@@ -129,10 +142,9 @@ function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisab
         <h3 className="psc-field-section-title psc-core-benefits-subtitle">Switching</h3>
         <div className="psc-field-grid">
           <PscSelectField label="Switching allowed" value={form.switchingAllowed} options={YES_NO_ALLOC_OPTIONS} onChange={(v) => patchForm("switchingAllowed", v)} />
-          <PscTextField label="Free switches per year" hint="e.g. 4" value={form.freeSwitchesPerYear} onChange={(v) => patchForm("freeSwitchesPerYear", v)} placeholder="" />
+          <PscTextField label="Free switches per year" value={form.freeSwitchesPerYear} onChange={(v) => patchForm("freeSwitchesPerYear", v)} placeholder="" />
           <label className="psc-field psc-field-wide">
             <span className="psc-field-label">Switch fee (after free switches)</span>
-            <span className="psc-field-hint">e.g. AED 50 per switch</span>
             <input className="psc-input" type="text" value={form.switchFeeAfterFree} onChange={(e) => patchForm("switchFeeAfterFree", e.target.value)} placeholder="" />
           </label>
         </div>
@@ -143,8 +155,8 @@ function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisab
         <div className="psc-field-grid">
           <PscSelectField label="Top-up allowed" value={form.topUpAllowed} options={YES_NO_ALLOC_OPTIONS} onChange={(v) => patchForm("topUpAllowed", v)} />
           <PscSelectField label="Partial withdrawal allowed" value={form.partialWithdrawalAllowed} options={YES_NO_ALLOC_OPTIONS} onChange={(v) => patchForm("partialWithdrawalAllowed", v)} />
-          <PscTextField label="Minimum withdrawal amount" hint="e.g. AED 1,000" value={form.minWithdrawalAmount} onChange={(v) => patchForm("minWithdrawalAmount", v)} placeholder="" />
-          <PscTextField label="Minimum remaining fund value" hint="e.g. AED 5,000" value={form.minRemainingFundValue} onChange={(v) => patchForm("minRemainingFundValue", v)} placeholder="" />
+          <PscTextField label="Minimum withdrawal amount" value={form.minWithdrawalAmount} onChange={(v) => patchForm("minWithdrawalAmount", v)} placeholder="" />
+          <PscTextField label="Minimum remaining fund value" value={form.minRemainingFundValue} onChange={(v) => patchForm("minRemainingFundValue", v)} placeholder="" />
         </div>
       </div>
 
@@ -154,7 +166,6 @@ function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisab
           <PscSelectField label="Premium holiday allowed" value={form.premiumHolidayAllowed} options={YES_NO_ALLOC_OPTIONS} onChange={(v) => patchForm("premiumHolidayAllowed", v)} />
           <label className="psc-field psc-field-wide">
             <span className="psc-field-label">Loyalty units</span>
-            <span className="psc-field-hint">e.g. add after year 5 / 10</span>
             <input className="psc-input" type="text" value={form.loyaltyUnits} onChange={(e) => patchForm("loyaltyUnits", e.target.value)} placeholder="" />
           </label>
         </div>
@@ -166,9 +177,11 @@ function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisab
           <button type="button" className="primary-button" onClick={onSave} disabled={saveDisabled}>
             Save allocation rules
           </button>
-          <button type="button" className="secondary-button" onClick={onCancel}>
-            Cancel
-          </button>
+          {!embedded && onCancel ? (
+            <button type="button" className="secondary-button" onClick={onCancel}>
+              Cancel
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -176,10 +189,14 @@ function FundAllocationDialogForm({ form, patchForm, onSave, onCancel, saveDisab
 }
 
 /**
- * @param {object[]} items
- * @param {(items: object[]) => void} onItemsChange
+ * @param {{
+ *   items: object[],
+ *   onItemsChange: (items: object[]) => void,
+ *   onViewFundDetails?: (fundId: string) => void,
+ * }} props
  */
-export function ProductStudioFundsPanel({ items, onItemsChange }) {
+export function ProductStudioFundsPanel({ items, onItemsChange, onViewFundDetails }) {
+  const viewDetailsEnabled = typeof onViewFundDetails === "function";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(() => emptyFundForm());
@@ -251,20 +268,7 @@ export function ProductStudioFundsPanel({ items, onItemsChange }) {
         return;
       }
       setEditingId(persisted ? id : null);
-      setForm({
-        fundName: row.fundName || "",
-        fundCode: row.fundCode || "",
-        fundType: row.fundType || "",
-        currency: row.currency || "",
-        riskRating: row.riskRating || "",
-        fundManager: row.fundManager || "",
-        navFrequency: row.navFrequency || "",
-        minAllocationPct: row.minAllocationPct || "",
-        maxAllocationPct: row.maxAllocationPct || "",
-        fundStatus: row.fundStatus || "Active",
-        shariaCompliant: row.shariaCompliant || "",
-        guaranteeApplicable: row.guaranteeApplicable || "",
-      });
+      setForm(fundRowToEditForm(row));
       setDialogOpen(true);
     },
     [list],
@@ -277,7 +281,7 @@ export function ProductStudioFundsPanel({ items, onItemsChange }) {
     }
     setAllocationFundId(id);
     setAllocationFundLabel(row.fundName?.trim() || row.fundCode || "Fund");
-    setAllocationForm(normalizeAllocationRules(row.allocationRules));
+    setAllocationForm(effectiveAllocationRulesForFund(row));
     setAllocationDialogOpen(true);
   }, [displayList]);
 
@@ -431,17 +435,11 @@ export function ProductStudioFundsPanel({ items, onItemsChange }) {
     <div className="psc-funds-panel">
       <div className="psc-core-benefits-list-wrap">
         <div className="psc-core-benefits-section-head">
-          <h2 className="psc-field-section-title psc-core-benefits-list-title">Funds ({displayList.length})</h2>
+          <h2 className="psc-field-section-title psc-core-benefits-list-title">Funds & Investments ({displayList.length})</h2>
           <button type="button" className="primary-button psc-core-benefits-add-btn" onClick={openAddDialog}>
             Create fund
           </button>
         </div>
-        {listIsMock ? (
-          <p className="psc-core-benefits-ref-desc">
-            <span className="psc-core-benefits-ref-desc-label">Sample data</span>
-            Example fund menu for layout preview. Create a fund or edit a row and save to store funds on this product.
-          </p>
-        ) : null}
         <ul className="psc-benefit-cards" role="list">
           {displayList.map((f) => {
             const meta = [
@@ -475,12 +473,20 @@ export function ProductStudioFundsPanel({ items, onItemsChange }) {
                       ))}
                     </div>
                     <div className="psc-benefit-card-actions">
-                      <button type="button" className="psc-card-action" onClick={() => openAllocationDialog(f.id)}>
-                        Allocation rules
-                      </button>
-                      <button type="button" className="psc-card-action psc-studio-row-edit" onClick={() => openEditDialog(f.id)}>
-                        Edit
-                      </button>
+                      {viewDetailsEnabled ? (
+                        <button type="button" className="primary-button psc-benefit-card-view" onClick={() => onViewFundDetails(f.id)}>
+                          View details
+                        </button>
+                      ) : (
+                        <>
+                          <button type="button" className="psc-card-action" onClick={() => openAllocationDialog(f.id)}>
+                            Allocation rules
+                          </button>
+                          <button type="button" className="psc-card-action psc-studio-row-edit" onClick={() => openEditDialog(f.id)}>
+                            Edit
+                          </button>
+                        </>
+                      )}
                       {!listIsMock ? (
                         <button type="button" className="secondary-button psc-benefit-card-remove" onClick={() => removeItem(f.id)}>
                           Remove

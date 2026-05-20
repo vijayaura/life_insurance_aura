@@ -1,6 +1,6 @@
-import { createPortal } from "react-dom";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { DropdownSelect } from "./DropdownSelect.jsx";
+import { ProductStudioLineItemsShell } from "./ProductStudioLineItemsShell.jsx";
 import {
   DEMO_FEES_LIST,
   FEE_BASIS_OPTIONS,
@@ -8,17 +8,32 @@ import {
   FEE_TYPE_CATALOG,
   YES_NO_ACTIVE,
   emptyFeeForm,
+  feeFormToRowPartial,
+  feeRowToForm,
   getFeeCatalogEntry,
   normalizeChargesConfiguration,
+  validateFeeForm,
 } from "./productStudioCharges.js";
-import { uid } from "./productStudioStore.js";
 
 const FEE_TYPE_SELECT_OPTIONS = FEE_TYPE_CATALOG.map((c) => ({ value: c.id, label: c.chargeName }));
 
-function FeeDialogForm({ form, patchForm, onSave, onCancel, saveLabel, onChargeTypeChange }) {
+export function ChargesDialogBody({ form, patchForm, embedded = false, onSave, saveLabel = "Save changes" }) {
+  const onChargeTypeChange = useCallback(
+    (chargeTypeId) => {
+      const cat = getFeeCatalogEntry(chargeTypeId);
+      patchForm({
+        chargeTypeId,
+        description: chargeTypeId !== "custom" && cat ? cat.catalogDescription : form.description,
+        customChargeName: chargeTypeId === "custom" ? form.customChargeName : "",
+      });
+    },
+    [form.customChargeName, form.description, patchForm],
+  );
+
   const isCustom = form.chargeTypeId === "custom";
+
   return (
-    <div className="psc-benefit-dialog-body">
+    <div className={`psc-benefit-dialog-body${embedded ? " psc-benefit-dialog-body--embedded" : ""}`}>
       <div className="psc-field-section">
         <h3 className="psc-field-section-title psc-core-benefits-subtitle">Charge type</h3>
         <div className="psc-field-grid">
@@ -46,7 +61,6 @@ function FeeDialogForm({ form, patchForm, onSave, onCancel, saveLabel, onChargeT
           ) : null}
           <label className="psc-field psc-field-wide">
             <span className="psc-field-label">Description</span>
-            <span className="psc-field-hint">How this fee applies on the product (defaults from catalog when you pick a charge).</span>
             <textarea
               className="psc-input psc-textarea psc-textarea--compact"
               rows={2}
@@ -67,7 +81,6 @@ function FeeDialogForm({ form, patchForm, onSave, onCancel, saveLabel, onChargeT
           </label>
           <label className="psc-field">
             <span className="psc-field-label">Basis value</span>
-            <span className="psc-field-hint">Amount, %, bps, or table ref</span>
             <input className="psc-input" type="text" value={form.basisValue} onChange={(e) => patchForm("basisValue", e.target.value)} placeholder="e.g. AED 50 or 1.5%" />
           </label>
           <label className="psc-field">
@@ -106,18 +119,15 @@ function FeeDialogForm({ form, patchForm, onSave, onCancel, saveLabel, onChargeT
           </label>
         </div>
       </div>
-
-      <div className="psc-field-section psc-benefit-dialog-actions-section">
-        <h3 className="psc-field-section-title psc-core-benefits-subtitle">Save fee</h3>
-        <div className="psc-benefit-dialog-footer">
-          <button type="button" className="primary-button" onClick={onSave}>
-            {saveLabel}
-          </button>
-          <button type="button" className="secondary-button" onClick={onCancel}>
-            Cancel
-          </button>
+      {embedded && onSave ? (
+        <div className="psc-field-section psc-benefit-dialog-actions-section">
+          <div className="psc-benefit-dialog-footer">
+            <button type="button" className="primary-button" onClick={onSave}>
+              {saveLabel}
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -134,228 +144,67 @@ function displayChargeTitle(row) {
  * @param {unknown} charges
  * @param {(next: object) => void} onChargesChange — receives normalized `{ items }`.
  */
-export function ProductStudioChargesPanel({ charges, onChargesChange }) {
+export function ProductStudioChargesPanel({ charges, onChargesChange, onViewItemDetails }) {
   const list = useMemo(() => normalizeChargesConfiguration(charges).items, [charges]);
-  const hasSavedFees = list.length > 0;
-  const displayList = hasSavedFees ? list : DEMO_FEES_LIST;
-  const listIsMock = !hasSavedFees;
 
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [form, setForm] = useState(() => emptyFeeForm());
-
-  const emit = useCallback(
-    (nextItems) => {
-      onChargesChange(normalizeChargesConfiguration({ items: nextItems }));
+  const onPersistItems = useCallback(
+    (items) => {
+      onChargesChange(normalizeChargesConfiguration({ items }));
     },
     [onChargesChange],
   );
 
-  const patchForm = useCallback((key, v) => {
-    setForm((f) => ({ ...f, [key]: v }));
-  }, []);
-
-  const resetDialog = useCallback(() => {
-    setEditingId(null);
-    setForm(emptyFeeForm());
-  }, []);
-
-  const closeDialog = useCallback(() => {
-    setDialogOpen(false);
-    resetDialog();
-  }, [resetDialog]);
-
-  useEffect(() => {
-    if (!dialogOpen) {
-      return undefined;
-    }
-    const onKey = (e) => {
-      if (e.key === "Escape") {
-        closeDialog();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [dialogOpen, closeDialog]);
-
-  const onChargeTypeChange = useCallback((chargeTypeId) => {
-    const cat = getFeeCatalogEntry(chargeTypeId);
-    setForm((f) => ({
-      ...f,
-      chargeTypeId,
-      description: cat && chargeTypeId !== "custom" ? cat.catalogDescription : f.description,
-      customChargeName: chargeTypeId === "custom" ? f.customChargeName : "",
-    }));
-  }, []);
-
-  const openCreate = useCallback(() => {
-    resetDialog();
-    setForm(emptyFeeForm());
-    setDialogOpen(true);
-  }, [resetDialog]);
-
-  const openEdit = useCallback(
-    (id) => {
-      const persisted = list.find((x) => x.id === id);
-      const demo = DEMO_FEES_LIST.find((x) => x.id === id);
-      const row = persisted || demo;
-      if (!row) {
-        return;
-      }
-      setEditingId(persisted ? id : null);
-      setForm({
-        chargeTypeId: row.chargeTypeId || "",
-        customChargeName: row.customChargeName || "",
-        description: row.description || "",
-        basisType: row.basisType || "",
-        basisValue: row.basisValue || "",
-        billingFrequency: row.billingFrequency || "",
-        appliesWhen: row.appliesWhen || "",
-        notes: row.notes || "",
-        active: row.active === "No" ? "No" : "Yes",
-      });
-      setDialogOpen(true);
-    },
+  const resolveRowById = useCallback(
+    (id) => list.find((x) => x.id === id) || DEMO_FEES_LIST.find((x) => x.id === id),
     [list],
   );
 
-  const saveFee = useCallback(() => {
-    if (!form.chargeTypeId) {
-      window.alert("Select a charge type.");
-      return;
-    }
-    if (form.chargeTypeId === "custom" && !form.customChargeName?.trim()) {
-      window.alert("Custom charge name is required.");
-      return;
-    }
-    const row = {
-      id: editingId || uid(),
-      chargeTypeId: form.chargeTypeId,
-      customChargeName: form.customChargeName?.trim() || "",
-      description: form.description?.trim() || "",
-      basisType: form.basisType?.trim() || "",
-      basisValue: form.basisValue?.trim() || "",
-      billingFrequency: form.billingFrequency?.trim() || "",
-      appliesWhen: form.appliesWhen?.trim() || "",
-      notes: form.notes?.trim() || "",
-      active: form.active === "No" ? "No" : "Yes",
-    };
-    const next = editingId ? list.map((x) => (x.id === editingId ? row : x)) : [...list, row];
-    emit(next);
-    closeDialog();
-  }, [closeDialog, editingId, emit, form, list]);
+  const isPersistedId = useCallback((id) => list.some((x) => x.id === id), [list]);
 
-  const removeItem = useCallback(
-    (id) => {
-      if (!window.confirm("Remove this fee line from the product?")) {
-        return;
-      }
-      emit(list.filter((x) => x.id !== id));
-      if (dialogOpen && editingId === id) {
-        closeDialog();
-      }
-    },
-    [closeDialog, dialogOpen, editingId, emit, list],
+  const getCardDescription = useCallback((row) => {
+    return row.description?.trim() || getFeeCatalogEntry(row.chargeTypeId)?.catalogDescription || "—";
+  }, []);
+
+  const getCardMeta = useCallback((row) => {
+    return [
+      { label: "Basis", value: row.basisValue || "—" },
+      { label: "Type", value: getFeeCatalogEntry(row.chargeTypeId)?.chargeName || "—" },
+      { label: "Billing", value: row.billingFrequency || "—" },
+      { label: "Active", value: row.active || "—" },
+    ];
+  }, []);
+
+  const renderDialogBody = useCallback(
+    ({ form, patchForm }) => <ChargesDialogBody form={form} patchForm={patchForm} />,
+    [],
   );
 
-  const dialogTitle = editingId ? "Edit fee" : "Create fee";
-  const saveLabel = editingId ? "Save changes" : "Save fee";
-
-  const dialogNode =
-    dialogOpen &&
-    typeof document !== "undefined" &&
-    createPortal(
-      <div
-        className="psc-benefit-dialog-backdrop"
-        role="presentation"
-        onClick={() => {
-          closeDialog();
-        }}
-      >
-        <div
-          className="psc-benefit-dialog"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="psc-fee-dialog-title"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <header className="psc-benefit-dialog-header">
-            <h2 id="psc-fee-dialog-title" className="psc-benefit-dialog-title">
-              {dialogTitle}
-            </h2>
-            <button type="button" className="psc-benefit-dialog-close" aria-label="Close dialog" onClick={closeDialog}>
-              ×
-            </button>
-          </header>
-          <FeeDialogForm
-            form={form}
-            patchForm={patchForm}
-            onSave={saveFee}
-            onCancel={closeDialog}
-            saveLabel={saveLabel}
-            onChargeTypeChange={onChargeTypeChange}
-          />
-        </div>
-      </div>,
-      document.body,
-    );
-
   return (
-    <div className="psc-charges-panel">
-      <p className="psc-charges-lead">Configure fee lines for this product. Sample rows show typical structures until you save your own.</p>
-
-      <div className="psc-core-benefits-list-wrap">
-        <div className="psc-core-benefits-section-head">
-          <h2 className="psc-field-section-title psc-core-benefits-list-title">Fee lines ({displayList.length})</h2>
-          <button type="button" className="primary-button psc-core-benefits-add-btn" onClick={openCreate}>
-            Create fee
-          </button>
-        </div>
-        <ul className="psc-benefit-cards" role="list">
-          {displayList.map((f) => {
-            const title = displayChargeTitle(f);
-            const meta = [
-              { label: "Basis", value: f.basisValue || "—" },
-              { label: "Type", value: getFeeCatalogEntry(f.chargeTypeId)?.chargeName || "—" },
-              { label: "Billing", value: f.billingFrequency || "—" },
-              { label: "Active", value: f.active || "—" },
-            ];
-            return (
-              <li key={f.id} className={`psc-benefit-card${listIsMock ? " psc-benefit-card--demo" : ""}`}>
-                <div className="psc-benefit-card-body">
-                  <div className="psc-benefit-card-lead">
-                    <p className="psc-benefit-card-name">{title}</p>
-                    <p className="psc-benefit-card-desc">{f.description?.trim() || getFeeCatalogEntry(f.chargeTypeId)?.catalogDescription || "—"}</p>
-                  </div>
-                  <div className="psc-benefit-card-meta-wrap">
-                    <div className="psc-benefit-card-meta psc-benefit-card-meta--strip" role="list">
-                      {meta.map((cell) => (
-                        <div key={cell.label} className="psc-benefit-card-meta-box" role="listitem">
-                          <span className="psc-meta-box-label">{cell.label}</span>
-                          <div className="psc-meta-box-value-row">
-                            <span className="psc-meta-box-value">{cell.value}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="psc-benefit-card-actions">
-                      <button type="button" className="psc-card-action psc-studio-row-edit" onClick={() => openEdit(f.id)}>
-                        Edit
-                      </button>
-                      {!listIsMock ? (
-                        <button type="button" className="secondary-button psc-benefit-card-remove" onClick={() => removeItem(f.id)}>
-                          Remove
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      </div>
-      {dialogNode}
-    </div>
+    <ProductStudioLineItemsShell
+      panelClassName="psc-charges-panel"
+      listTitle="Fee lines"
+      createButtonLabel="Create fee"
+      removeConfirmMessage="Remove this fee line from the product?"
+      persistedItems={list}
+      demoItems={DEMO_FEES_LIST}
+      onPersistItems={onPersistItems}
+      resolveRowById={resolveRowById}
+      isPersistedId={isPersistedId}
+      emptyForm={emptyFeeForm}
+      rowToForm={feeRowToForm}
+      formToRowPartial={feeFormToRowPartial}
+      validateForm={validateFeeForm}
+      dialogTitleCreate="Create fee"
+      dialogTitleEdit="Edit fee"
+      saveLabelCreate="Save fee"
+      saveLabelEdit="Save changes"
+      actionsSectionTitle="Save fee"
+      dialogHeadingId="psc-fee-dialog-title"
+      getCardTitle={displayChargeTitle}
+      getCardDescription={getCardDescription}
+      getCardMeta={getCardMeta}
+      renderDialogBody={renderDialogBody}
+      onViewItemDetails={onViewItemDetails}
+    />
   );
 }

@@ -117,6 +117,51 @@ export function normalizeChargesConfiguration(raw) {
   return base;
 }
 
+/** @param {unknown} row */
+export function feeRowToForm(row) {
+  const r = row && typeof row === "object" ? row : {};
+  return {
+    chargeTypeId: String(r.chargeTypeId ?? "").trim(),
+    customChargeName: String(r.customChargeName ?? "").trim(),
+    description: String(r.description ?? "").trim(),
+    basisType: String(r.basisType ?? "").trim(),
+    basisValue: String(r.basisValue ?? "").trim(),
+    billingFrequency: String(r.billingFrequency ?? "").trim(),
+    appliesWhen: String(r.appliesWhen ?? "").trim(),
+    notes: String(r.notes ?? "").trim(),
+    active: String(r.active ?? "").trim() === "No" ? "No" : "Yes",
+  };
+}
+
+/** @param {object} form */
+export function feeFormToRowPartial(form) {
+  const f = form && typeof form === "object" ? form : {};
+  const active = String(f.active ?? "").trim() === "No" ? "No" : "Yes";
+  return {
+    chargeTypeId: String(f.chargeTypeId ?? "").trim(),
+    customChargeName: String(f.customChargeName ?? "").trim(),
+    description: String(f.description ?? "").trim(),
+    basisType: String(f.basisType ?? "").trim(),
+    basisValue: String(f.basisValue ?? "").trim(),
+    billingFrequency: String(f.billingFrequency ?? "").trim(),
+    appliesWhen: String(f.appliesWhen ?? "").trim(),
+    notes: String(f.notes ?? "").trim(),
+    active,
+  };
+}
+
+/** @param {object} form */
+export function validateFeeForm(form) {
+  const f = form && typeof form === "object" ? form : {};
+  if (!String(f.chargeTypeId ?? "").trim()) {
+    return "Select a charge type.";
+  }
+  if (f.chargeTypeId === "custom" && !String(f.customChargeName ?? "").trim()) {
+    return "Custom charge name is required.";
+  }
+  return null;
+}
+
 /** Demo fee lines when product has none saved. */
 export const DEMO_FEES_LIST = [
   {

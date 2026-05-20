@@ -13,6 +13,15 @@ export const BENEFIT_TRIGGER_OPTIONS = ["Death", "Maturity", "Disability", "Illn
 
 export const YES_NO_OPTIONS = ["Yes", "No"];
 
+/** Mortality / pricing rate basis (persisted on core benefit row). */
+export const MORTALITY_RATE_BASIS_OPTIONS = [
+  { value: "PER_1000_SUM_ASSURED", label: "Per 1,000 sum assured" },
+  { value: "PER_MILLE_NET_RISK", label: "Per mille net risk" },
+  { value: "PER_UNIT_COVER", label: "Per unit cover" },
+];
+
+export const DEFAULT_MORTALITY_RATE_BASIS = MORTALITY_RATE_BASIS_OPTIONS[0].value;
+
 /**
  * Each preset seeds the benefit form. All fields are user-editable after selection.
  * `description` is reference copy for the UI (not persisted on the benefit row).
@@ -208,6 +217,7 @@ export function emptyCoreBenefitForm() {
     benefitName: "",
     benefitType: BENEFIT_TYPE_OPTIONS[0],
     mandatoryOptional: MANDATORY_OPTIONAL_OPTIONS[0],
+    rateBasis: DEFAULT_MORTALITY_RATE_BASIS,
     calculationMethod: CALCULATION_METHOD_OPTIONS[0],
     benefitTrigger: BENEFIT_TRIGGER_OPTIONS[0],
     waitingPeriod: "",
@@ -217,6 +227,28 @@ export function emptyCoreBenefitForm() {
     multipleClaimsAllowed: "No",
     reducesBaseSumAssured: "No",
     canBeAccelerated: "No",
+  };
+}
+
+/** Map a persisted / demo benefit row to the same shape as the add-benefit form. */
+export function coreBenefitRowToForm(row) {
+  if (!row || typeof row !== "object") {
+    return emptyCoreBenefitForm();
+  }
+  return {
+    benefitName: row.benefitName || "",
+    benefitType: row.benefitType || BENEFIT_TYPE_OPTIONS[0],
+    mandatoryOptional: row.mandatoryOptional || MANDATORY_OPTIONAL_OPTIONS[0],
+    rateBasis: row.rateBasis || DEFAULT_MORTALITY_RATE_BASIS,
+    calculationMethod: row.calculationMethod || CALCULATION_METHOD_OPTIONS[0],
+    benefitTrigger: row.benefitTrigger || BENEFIT_TRIGGER_OPTIONS[0],
+    waitingPeriod: row.waitingPeriod || "",
+    exclusionPeriod: row.exclusionPeriod || "",
+    maximumPayable: row.maximumPayable || "",
+    benefitExpiry: row.benefitExpiry || "",
+    multipleClaimsAllowed: row.multipleClaimsAllowed || "No",
+    reducesBaseSumAssured: row.reducesBaseSumAssured || "No",
+    canBeAccelerated: row.canBeAccelerated || "No",
   };
 }
 

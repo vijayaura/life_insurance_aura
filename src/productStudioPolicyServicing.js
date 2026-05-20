@@ -115,6 +115,49 @@ export function normalizePolicyServicingConfiguration(raw) {
   return base;
 }
 
+/** @param {unknown} row */
+export function servicingRowToForm(row) {
+  const r = row && typeof row === "object" ? row : {};
+  return {
+    featureTypeId: String(r.featureTypeId ?? "").trim(),
+    customFeatureName: String(r.customFeatureName ?? "").trim(),
+    description: String(r.description ?? "").trim(),
+    allowedAs: String(r.allowedAs ?? "").trim(),
+    effectiveTiming: String(r.effectiveTiming ?? "").trim(),
+    uwRequired: String(r.uwRequired ?? "").trim(),
+    notes: String(r.notes ?? "").trim(),
+    active: String(r.active ?? "").trim() === "No" ? "No" : "Yes",
+  };
+}
+
+/** @param {object} form */
+export function servicingFormToRowPartial(form) {
+  const f = form && typeof form === "object" ? form : {};
+  const active = String(f.active ?? "").trim() === "No" ? "No" : "Yes";
+  return {
+    featureTypeId: String(f.featureTypeId ?? "").trim(),
+    customFeatureName: String(f.customFeatureName ?? "").trim(),
+    description: String(f.description ?? "").trim(),
+    allowedAs: String(f.allowedAs ?? "").trim(),
+    effectiveTiming: String(f.effectiveTiming ?? "").trim(),
+    uwRequired: String(f.uwRequired ?? "").trim(),
+    notes: String(f.notes ?? "").trim(),
+    active,
+  };
+}
+
+/** @param {object} form */
+export function validateServicingForm(form) {
+  const f = form && typeof form === "object" ? form : {};
+  if (!String(f.featureTypeId ?? "").trim()) {
+    return "Select a servicing feature.";
+  }
+  if (f.featureTypeId === "custom" && !String(f.customFeatureName ?? "").trim()) {
+    return "Custom rule name is required.";
+  }
+  return null;
+}
+
 /** Demo rule lines when product has none saved. */
 export const DEMO_POLICY_SERVICING_LIST = [
   {
